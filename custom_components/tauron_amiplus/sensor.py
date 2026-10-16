@@ -52,7 +52,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     for variable in config[CONF_MONITORED_VARIABLES]:
         sensor_type_config = SENSOR_TYPES[variable]
         dev.append(TauronAmiplusSensor(coordinator, name, meter_id, variable, sensor_type_config["state_class"]))
-    async_add_entities(dev, True)
+    async_add_entities(dev, False)
 
 
 async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_entities):
@@ -99,7 +99,7 @@ async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_ent
             )
         )
 
-    async_add_entities(sensors, True)
+    async_add_entities(sensors, False)
 
 
 class TauronAmiplusSensor(SensorEntity, CoordinatorEntity):
