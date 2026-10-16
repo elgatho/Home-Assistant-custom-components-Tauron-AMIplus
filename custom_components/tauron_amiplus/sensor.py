@@ -295,9 +295,8 @@ class TauronAmiplusConfigFlowSensor(TauronAmiplusSensor):
             "name": f"{DEFAULT_NAME} {self._meter_name}",
             "manufacturer": "TAURON",
             "model": self._meter_id,
-            "sw_version": f"Tariff {self._tariff}",
-            "via_device_id": None,
-            "configuration_url": CONST_URL_SERVICE,
+             "sw_version": f"Tariff {self._tariff}",
+             "configuration_url": CONST_URL_SERVICE,
         }
 
     @property
