@@ -1,7 +1,7 @@
 {
   "domain": "tauron_amiplus",
   "name": "Tauron AMIplus",
-  "codeowners": ["@PiotrMachowski"],
+  "codeowners": ["@PiotrMachowski ElgathoFork"],
   "config_flow": true,
   "dependencies": ["recorder"],
   "documentation": "https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus",
