@@ -1,8 +1,6 @@
 {
   "name": "Tauron AMIplus",
   "render_readme": true,
-  "zip_release": false,
-  "filename": "tauron_amiplus.zip",
   "country": "PL",
   "homeassistant": "2022.12.0"
 }
