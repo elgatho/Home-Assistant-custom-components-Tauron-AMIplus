@@ -15,7 +15,7 @@ from .const import (CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_12_MONTHS, CONF_SH
                     CONST_LAST_12_MONTHS, CONST_MONTHLY, CONST_READING, CONST_URL_SERVICE, CONST_YEARLY, DEFAULT_NAME,
                     DOMAIN, SENSOR_TYPES, SENSOR_TYPES_YAML, TYPE_BALANCED_CONFIGURABLE, TYPE_BALANCED_DAILY,
                     TYPE_BALANCED_LAST_12_MONTHS, TYPE_BALANCED_MONTHLY, TYPE_BALANCED_YEARLY,
-                    TYPE_AMOUNT, TYPE_AMOUNT_PAYMENT)
+                    TYPE_AMOUNT, TYPE_AMOUNT_PAYMENT, TYPE_ENERGY_STORAGE)
 from .coordinator import TauronAmiplusUpdateCoordinator
 from .typing_helpers import TauronAmiplusConfigEntry
 
@@ -83,7 +83,10 @@ async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_ent
         }
     if not show_12_months:
         sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_LAST_12_MONTHS)}
-    if not show_configurable:
+    if TYPE_ENERGY_STORAGE in sensor_types:
+        sensor_types = {k: v for k, v in sensor_types.items() if k != TYPE_ENERGY_STORAGE}
+    energy_storage_sensor = TauronAmiplusEnergyStorageSensor(coordinator, meter_name or name, meter_id)
+    sensors.append(energy_storage_sensor)
         sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_CONFIGURABLE)}
 
     for sensor_type, sensor_type_config in sensor_types.items():
@@ -100,6 +103,112 @@ async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_ent
         )
 
     async_add_entities(sensors, False)
+
+
+class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
+    """Sensor representing the virtual energy storage for net-metering 1:0.8."""
+
+    def __init__(self, coordinator: TauronAmiplusUpdateCoordinator, name: str, meter_id: str):
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._client_name = name
+        self._meter_id = meter_id
+        self._attr_name = f"{name} Domowy magazyn energii"
+        self._attr_unique_id = f"tauron-amiplus-{meter_id}-domowy-magazyn-energii"
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_icon = "mdi:home-battery-outline"
+        self._state = None
+        self._available = False
+
+    @property
+    def native_value(self):
+        """Return the state of the sensor."""
+        return self._state
+
+    @property
+    def available(self):
+        """Return if the sensor is available."""
+        return self._available
+
+    @property
+    def device_class(self):
+        return SensorDeviceClass.ENERGY
+
+    @property
+    def state_class(self):
+        return SensorStateClass.TOTAL
+
+    @property
+    def extra_state_attributes(self):
+        """Return additional state attributes."""
+        return {
+            "source_generation": f"sensor.tauron_amiplus_{self._meter_id}_monthly_energy_generation",
+            "source_consumption": f"sensor.tauron_amiplus_{self._meter_id}_monthly_energy_consumption",
+            "initial_balance_entity": "input_number.domowy_magazyn_energii_start",
+        }
+
+    def _handle_coordinator_update(self):
+        """Handle updated data from the coordinator."""
+        _LOGGER.debug(f"Updating energy storage sensor for meter: {self._meter_id}")
+        try:
+            initial_state = 0.0
+            if self.hass:
+                initial_entity = self.hass.states.get("input_number.domowy_magazyn_energii_start")
+                if initial_entity and initial_entity.state not in (None, "unknown", "unavailable"):
+                    try:
+                        initial_state = float(initial_entity.state)
+                    except (ValueError, TypeError):
+                        _LOGGER.warning("Invalid initial state value in input_number.domowy_magazyn_energii_start, using 0.0")
+                        initial_state = 0.0
+
+            monthly_gen = 0.0
+            monthly_cons = 0.0
+            gen_available = False
+            cons_available = False
+            data = self.coordinator.data
+            if data and data.generation and data.consumption:
+                gen_dataset = data.generation
+                cons_dataset = data.consumption
+                if gen_dataset.json_monthly is not None:
+                    try:
+                        monthly_gen = float(gen_dataset.json_monthly.get("sum", 0.0))
+                        gen_available = True
+                    except (ValueError, TypeError, AttributeError):
+                        _LOGGER.warning("Could not parse monthly generation value")
+                if cons_dataset.json_monthly is not None:
+                    try:
+                        monthly_cons = float(cons_dataset.json_monthly.get("sum", 0.0))
+                        cons_available = True
+                    except (ValueError, TypeError, AttributeError):
+                        _LOGGER.warning("Could not parse monthly consumption value")
+
+            if not gen_available or not cons_available:
+                _LOGGER.warning("Monthly generation or consumption data not available, sensor unavailable")
+                self._state = None
+                self._available = False
+                self.async_write_ha_state()
+                return
+
+            storage_value = initial_state + (monthly_gen * 0.8) - monthly_cons
+
+            if storage_value < 0:
+                _LOGGER.warning(
+                    "Calculated storage value %.2f kWh is negative. Check the initial balance or net-metering assumptions.",
+                    storage_value,
+                )
+                self._state = round(storage_value, 2)
+                self._available = True
+            else:
+                self._state = round(storage_value, 2)
+                self._available = True
+
+            self.async_write_ha_state()
+
+        except Exception as e:
+            _LOGGER.error(f"Error updating energy storage sensor: {str(e)}")
+            self._state = None
+            self._available = False
+            self.async_write_ha_state()
 
 
 class TauronAmiplusSensor(SensorEntity, CoordinatorEntity):
