@@ -158,8 +158,12 @@ SENSOR_TYPES = {
         "name": "Configurable balance",
         "state_class": SensorStateClass.TOTAL,
     },
+    TYPE_ENERGY_STORAGE: {
+        "name": "Domowy magazyn energii",
+        "state_class": SensorStateClass.TOTAL,
+    },
     # TYPE_AMOUNT_PAYMENT: {
     #     "name": "Account balance",
     #     "state_class": SensorStateClass.MEASUREMENT,
     # },
-}
+}

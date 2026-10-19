@@ -1,6 +1,10 @@
 """Support for TAURON sensors."""
 import dataclasses
+import datetime
 import logging
+from pathlib import Path
+
+from homeassistant.helpers.storage import Store
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -17,6 +21,7 @@ from .const import (CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_12_MONTHS, CONF_SH
                     TYPE_BALANCED_LAST_12_MONTHS, TYPE_BALANCED_MONTHLY, TYPE_BALANCED_YEARLY,
                     TYPE_AMOUNT, TYPE_AMOUNT_PAYMENT, TYPE_ENERGY_STORAGE)
 from .coordinator import TauronAmiplusUpdateCoordinator
+from .energy_storage import calculate_monthly_window, load_normalized_raw
 from .typing_helpers import TauronAmiplusConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,11 +88,12 @@ async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_ent
         }
     if not show_12_months:
         sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_LAST_12_MONTHS)}
-    if TYPE_ENERGY_STORAGE in sensor_types:
-        sensor_types = {k: v for k, v in sensor_types.items() if k != TYPE_ENERGY_STORAGE}
-    energy_storage_sensor = TauronAmiplusEnergyStorageSensor(coordinator, meter_name or name, meter_id)
-    sensors.append(energy_storage_sensor)
+    if not show_configurable:
         sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_CONFIGURABLE)}
+    if TYPE_ENERGY_STORAGE in sensor_types:
+        energy_storage_sensor = TauronAmiplusEnergyStorageSensor(coordinator, meter_name or name, meter_id)
+        sensors.append(energy_storage_sensor)
+        sensor_types = {k: v for k, v in sensor_types.items() if k != TYPE_ENERGY_STORAGE}
 
     for sensor_type, sensor_type_config in sensor_types.items():
         sensors.append(
@@ -113,12 +119,20 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
         super().__init__(coordinator)
         self._client_name = name
         self._meter_id = meter_id
-        self._attr_name = f"{name} Domowy magazyn energii"
-        self._attr_unique_id = f"tauron-amiplus-{meter_id}-domowy-magazyn-energii"
+        self._attr_name = "Domowy magazyn energii"
+        self._attr_unique_id = "domowy_magazyn_energii"
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_icon = "mdi:home-battery-outline"
         self._state = None
         self._available = False
+        self._accuracy = "requires_sync"
+        self._storage = Store(coordinator.hass, 1, f"tauron_amiplus_energy_storage_{meter_id}")
+        self._storage_state = None
+        self._last_period = None
+        self._statistics_state = None
+        self._statistics_loaded = False
+        self._raw_tariff = "G11"
+        self._raw_path = Path(coordinator.hass.config.path("tauron_raw_normalized.json"))
 
     @property
     def native_value(self):
@@ -144,63 +158,58 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
         return {
             "source_generation": f"sensor.tauron_amiplus_{self._meter_id}_monthly_energy_generation",
             "source_consumption": f"sensor.tauron_amiplus_{self._meter_id}_monthly_energy_consumption",
-            "initial_balance_entity": "input_number.domowy_magazyn_energii_start",
+            "initial_balance_entity": None,
+            "accuracy": getattr(self, "_accuracy", "requires_sync"),
+            "model": "last_12_months_monthly_fifo_approximation",
+            "period": getattr(self, "_storage_state", {}).get("period"),
+            "uncovered_consumption": getattr(self, "_storage_state", {}).get("uncovered_consumption"),
+            "window": "last_12_completed_months",
+            "tariff": self._raw_tariff,
+            "raw_source": str(self._raw_path),
         }
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self._storage_state = await self._storage.async_load()
+        self._handle_coordinator_update()
 
     def _handle_coordinator_update(self):
         """Handle updated data from the coordinator."""
         _LOGGER.debug(f"Updating energy storage sensor for meter: {self._meter_id}")
         try:
             initial_state = 0.0
-            if self.hass:
-                initial_entity = self.hass.states.get("input_number.domowy_magazyn_energii_start")
-                if initial_entity and initial_entity.state not in (None, "unknown", "unavailable"):
-                    try:
-                        initial_state = float(initial_entity.state)
-                    except (ValueError, TypeError):
-                        _LOGGER.warning("Invalid initial state value in input_number.domowy_magazyn_energii_start, using 0.0")
-                        initial_state = 0.0
 
-            monthly_gen = 0.0
-            monthly_cons = 0.0
-            gen_available = False
-            cons_available = False
             data = self.coordinator.data
-            if data and data.generation and data.consumption:
-                gen_dataset = data.generation
-                cons_dataset = data.consumption
-                if gen_dataset.json_monthly is not None:
-                    try:
-                        monthly_gen = float(gen_dataset.json_monthly.get("sum", 0.0))
-                        gen_available = True
-                    except (ValueError, TypeError, AttributeError):
-                        _LOGGER.warning("Could not parse monthly generation value")
-                if cons_dataset.json_monthly is not None:
-                    try:
-                        monthly_cons = float(cons_dataset.json_monthly.get("sum", 0.0))
-                        cons_available = True
-                    except (ValueError, TypeError, AttributeError):
-                        _LOGGER.warning("Could not parse monthly consumption value")
-
-            if not gen_available or not cons_available:
-                _LOGGER.warning("Monthly generation or consumption data not available, sensor unavailable")
+            if not data or not data.generation or not data.consumption:
                 self._state = None
                 self._available = False
                 self.async_write_ha_state()
                 return
 
-            storage_value = initial_state + (monthly_gen * 0.8) - monthly_cons
-
-            if storage_value < 0:
-                _LOGGER.warning(
-                    "Calculated storage value %.2f kWh is negative. Check the initial balance or net-metering assumptions.",
-                    storage_value,
-                )
-                self._state = round(storage_value, 2)
-                self._available = True
+            if self._raw_path.is_file():
+                generation_data, consumption_data, self._raw_tariff = load_normalized_raw(self._raw_path)
+                accuracy = "raw_hourly_fifo"
             else:
-                self._state = round(storage_value, 2)
-                self._available = True
+                generation_data = getattr(data.generation, "json_last_12_months_hourly", None)
+                consumption_data = getattr(data.consumption, "json_last_12_months_hourly", None)
+                if not generation_data or not consumption_data:
+                    self._state = None
+                    self._available = False
+                    self.async_write_ha_state()
+                    return
+                generation_data = generation_data["data"]["allData"]
+                consumption_data = consumption_data["data"]["allData"]
+                accuracy = "coordinator_last_12_months"
+            state, storage_value, _ = calculate_monthly_window(
+                generation_data,
+                consumption_data,
+                datetime.date.today(),
+            )
+            self._storage_state = state
+            self.hass.async_create_task(self._storage.async_save(state))
+            self._state = storage_value
+            self._available = True
+            self._accuracy = accuracy
 
             self.async_write_ha_state()
 
