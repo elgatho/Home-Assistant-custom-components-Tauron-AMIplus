@@ -174,7 +174,7 @@ class TauronAmiplusConnector:
             potential_max = now.replace(day=1, month=1)
             if potential_max < cache_max:
                 cache_max = potential_max
-        if self._show_configurable and self._show_configurable_date is not None:
+        if include_statistics and self._show_configurable and self._show_configurable_date is not None:
             end = datetime.datetime.now()
             start = datetime.datetime.combine(self._show_configurable_date, end.time())
             dataset.json_configurable_hourly = await self.get_raw_values_daily_for_range(start, end, generation)
@@ -484,6 +484,9 @@ class TauronAmiplusConnector:
 
     async def execute_post(self, url: str, payload: dict):
         self.log(f"EXECUTING: {url} with payload: {payload}")
+        if self._session is None or self._session.closed:
+            self.log("HTTP session is closed; re-authenticating")
+            await self.login()
         response = await self._session.request(
             "POST",
             url,
