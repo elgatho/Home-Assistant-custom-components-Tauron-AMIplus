@@ -59,24 +59,31 @@ def build_import_payload(payload: dict[str, Any], meter_id: str) -> dict[str, tu
     }
 
 
-async def async_import_raw_once(hass, meter_id: str, path: str | Path) -> bool:
+async def async_import_raw_once(hass, meter_id: str, path: str | Path, *, force: bool = False) -> bool:
+    _LOGGER.info("Starting Tauron historical import: meter=%s path=%s force=%s", meter_id, path, force)
     raw_path = Path(path)
     if not await asyncio.to_thread(raw_path.is_file):
-        _LOGGER.debug("Tauron historical import skipped; file does not exist: %s", raw_path)
+        _LOGGER.error("Tauron historical import failed: file does not exist: %s", raw_path)
         return False
     raw_bytes = await asyncio.to_thread(raw_path.read_bytes)
     digest = hashlib.sha256(raw_bytes).hexdigest()
     store = Store(hass, IMPORT_VERSION, f"tauron_amiplus_history_{meter_id}")
     marker = await store.async_load()
-    if marker and marker.get("sha256") == digest and marker.get("version") == IMPORT_VERSION:
+    if marker and marker.get("sha256") == digest and marker.get("version") == IMPORT_VERSION and not force:
+        _LOGGER.info("Tauron historical import skipped: already imported sha256=%s", digest[:12])
         return False
-    payload = json.loads(raw_bytes)
-    data = build_import_payload(payload, meter_id)
-    for metadata, statistics in data.values():
-        if statistics:
-            async_add_external_statistics(hass, metadata, statistics)
-    await store.async_save({"version": IMPORT_VERSION, "sha256": digest, "imported_at": datetime.datetime.now().isoformat()})
-    _LOGGER.info("Imported Tauron historical statistics for meter %s", meter_id)
+    try:
+        payload = json.loads(raw_bytes)
+        data = build_import_payload(payload, meter_id)
+        for measurement_type, (metadata, statistics) in data.items():
+            _LOGGER.info("Importing Tauron series=%s records=%d", measurement_type, len(statistics))
+            if statistics:
+                async_add_external_statistics(hass, metadata, statistics)
+        await store.async_save({"version": IMPORT_VERSION, "sha256": digest, "imported_at": datetime.datetime.now().isoformat()})
+    except Exception:
+        _LOGGER.exception("Tauron historical import failed: meter=%s", meter_id)
+        return False
+    _LOGGER.info("Tauron historical import completed: meter=%s sha256=%s", meter_id, digest[:12])
     return True
 
 
