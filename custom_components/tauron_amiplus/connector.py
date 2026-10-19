@@ -161,8 +161,8 @@ class TauronAmiplusConnector:
         dataset.json_daily, dataset.daily_date = await self.get_values_daily(generation)
         dataset.json_monthly = await self.get_values_monthly(generation)
         dataset.json_yearly = await self.get_values_yearly(generation)
-        dataset.json_month_hourly = await self.get_values_month_hourly(generation)
         if include_statistics:
+            dataset.json_month_hourly = await self.get_values_month_hourly(generation)
             dataset.json_last_30_days_hourly = await self.get_values_last_30_days_hourly(generation)
         now = datetime.datetime.now()
         cache_max = datetime.datetime.now() - datetime.timedelta(days=32)

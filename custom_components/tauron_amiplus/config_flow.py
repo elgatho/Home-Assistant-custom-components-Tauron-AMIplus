@@ -368,11 +368,9 @@ class TauronAmiplusOptionsFlowHandler(config_entries.OptionsFlow):
                          default=self.get_option(CONF_STORE_STATISTICS, True),
                      ): bool,
                      vol.Required(
-    CONF_SETTLEMENT_FACTOR,
-    CONF_ENERGY_STORAGE_RESET_DATE,
-
+                         CONF_SETTLEMENT_FACTOR,
                          default=self.get_option(CONF_SETTLEMENT_FACTOR, 0.8),
-                          ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+                     ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
                      vol.Optional(
                          CONF_ENERGY_STORAGE_RESET_DATE,
                          default=self.get_option(CONF_ENERGY_STORAGE_RESET_DATE, vol.UNDEFINED),

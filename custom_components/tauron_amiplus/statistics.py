@@ -14,6 +14,7 @@ from .const import (CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_BALANCED, CONF_SHO
                     CONST_CONSUMPTION, CONST_GENERATION, DEFAULT_NAME, STATISTICS_DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
+MAX_AUTOMATIC_STATISTICS_DAYS = 7
 
 
 class TauronAmiplusStatisticsUpdater:
@@ -56,7 +57,10 @@ class TauronAmiplusStatisticsUpdater:
                 or not all(self.are_stats_up_to_date(v["last_stats_end"]) for v in all_stat_ids.values())):
             if start_date is None:
                 stored_ends = [v["last_stats_end"] for v in all_stat_ids.values() if v["last_stats_end"] is not None]
-                start_range = min(stored_ends, default=now - datetime.timedelta(days=365))
+                start_range = max(
+                    min(stored_ends, default=now - datetime.timedelta(days=MAX_AUTOMATIC_STATISTICS_DAYS)),
+                    now - datetime.timedelta(days=MAX_AUTOMATIC_STATISTICS_DAYS),
+                )
                 start_range = start_range.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
             else:
                 start_range = start_date
@@ -74,9 +78,6 @@ class TauronAmiplusStatisticsUpdater:
 
         if not raw_data[CONST_CONSUMPTION]:
             return
-
-        if zones != self._zones_from_data(last_data):
-            all_stat_ids = await self.prepare_stats_ids(zones)
 
         if self.show_balanced:
             balanced_consumption, balanced_generation = self.prepare_balanced_raw_data(raw_data)
