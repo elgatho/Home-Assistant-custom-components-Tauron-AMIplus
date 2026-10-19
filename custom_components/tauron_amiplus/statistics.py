@@ -250,9 +250,14 @@ class TauronAmiplusStatisticsUpdater:
             self.hass, 1, statistic_id, True, {"state", "sum"})
 
     async def get_stats(self, raw_data, statistic_id):
+        if not raw_data:
+            return {statistic_id: [{"sum": 0, "start": None}]}
+        start = self.get_time(raw_data[0])
+        if start is None:
+            return {statistic_id: [{"sum": 0, "start": None}]}
         return await get_instance(self.hass).async_add_executor_job(
             statistics_during_period,
-            self.hass, self.get_time(raw_data[0]), None, [statistic_id], "hour", None, {"state", "sum"})
+            self.hass, start, None, [statistic_id], "hour", None, {"state", "sum"})
 
     def log(self, msg):
         _LOGGER.debug(f"[{self.meter_id}]: {msg}")
@@ -260,6 +265,18 @@ class TauronAmiplusStatisticsUpdater:
     @staticmethod
     def get_time(raw_hour):
         zone = get_time_zone("Europe/Warsaw")
-        date = raw_hour["Date"]
-        hour = int(raw_hour["Hour"]) - 1
-        return datetime.datetime.strptime(f"{date} {hour}:00", "%Y-%m-%d %H:%M").replace(tzinfo=zone)
+        value = raw_hour.get("Date")
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                day = datetime.date.fromisoformat(value[:10])
+                hour = int(raw_hour.get("Hour", "")) - 1
+                if not 0 <= hour <= 23:
+                    return None
+                return datetime.datetime.combine(day, datetime.time(hour), tzinfo=zone)
+            except (TypeError, ValueError):
+                return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=zone)
