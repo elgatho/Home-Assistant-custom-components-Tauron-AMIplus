@@ -12,10 +12,11 @@ from homeassistant.util.dt import DATE_STR_FORMAT, parse_date
 
 from .const import (
     CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_12_MONTHS, CONF_SHOW_BALANCED, CONF_SHOW_BALANCED_YEAR,
-    CONF_SHOW_CONFIGURABLE, CONF_SHOW_CONFIGURABLE_DATE, CONF_SHOW_GENERATION, CONF_STORE_STATISTICS, CONF_TARIFF,
+    CONF_SHOW_CONFIGURABLE, CONF_SHOW_CONFIGURABLE_DATE, CONF_SHOW_GENERATION, CONF_STORE_STATISTICS, CONF_SETTLEMENT_FACTOR, CONF_TARIFF,
     DOMAIN, PLATFORMS,
 )
 from .coordinator import TauronAmiplusUpdateCoordinator
+from .history_import import async_import_raw_once
 from .services import register_all_services
 from .typing_helpers import TauronAmiplusRuntimeData, TauronAmiplusConfigEntry
 
@@ -65,10 +66,19 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: TauronAmiplusConf
     show_configurable = config_entry.options.get(CONF_SHOW_CONFIGURABLE, False)
     show_configurable_date = config_entry.options.get(CONF_SHOW_CONFIGURABLE_DATE, None)
     store_statistics = config_entry.options.get(CONF_STORE_STATISTICS, False)
+    settlement_factor = config_entry.options.get(CONF_SETTLEMENT_FACTOR, 0.8)
     if show_configurable_date is not None:
         show_configurable_date = parse_date(show_configurable_date)
     else:
         show_configurable = False
+
+    hass.async_create_task(
+        async_import_raw_once(
+            hass,
+            meter_id,
+            hass.config.path("tauron_raw_data.json"),
+        )
+    )
 
     tauron_amiplus_update_coordinator = TauronAmiplusUpdateCoordinator(
         hass,
@@ -84,6 +94,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: TauronAmiplusConf
         show_configurable=show_configurable,
         show_configurable_date=show_configurable_date,
         store_statistics=store_statistics,
+        settlement_factor=settlement_factor,
     )
     config_entry.runtime_data = TauronAmiplusRuntimeData(tauron_amiplus_update_coordinator)
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)

@@ -44,6 +44,21 @@ async def get_config_entry_diagnostics(hass: HomeAssistant, entry: TauronAmiplus
             "json_month_hourly": raw_data.consumption.json_month_hourly,
             "json_last_30_days_hourly": raw_data.consumption.json_last_30_days_hourly,
         },
+        "hourly_series_counts": {
+            measurement_type: len(raw_data.consumption.hourly_series.get(measurement_type, []))
+            for measurement_type in raw_data.consumption.hourly_series
+        } if raw_data.consumption else {},
+        "hourly_diagnostics": {
+            day: {
+                "invalid_readings": diagnostics.invalid_readings,
+                "missing_hours": diagnostics.missing_hours,
+                "duplicate_hours": diagnostics.duplicate_hours,
+                "values_mismatches": diagnostics.values_mismatches,
+                "status_counts": diagnostics.status_counts,
+                "sum_mismatch": str(diagnostics.sum_mismatch),
+            }
+            for day, diagnostics in raw_data.consumption.hourly_diagnostics.items()
+        } if raw_data.consumption else {},
         "raw_data_generation": {
             "json_reading": raw_data.generation.json_reading,
             "json_daily": raw_data.generation.json_daily,

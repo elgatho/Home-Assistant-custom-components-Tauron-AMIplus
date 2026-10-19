@@ -271,10 +271,15 @@ class TauronAmiplusFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_SHOW_CONFIGURABLE_DATE,
                     default=user_input.get(CONF_SHOW_CONFIGURABLE_DATE, vol.UNDEFINED),
                 ): selector({"date": {}}),
-                vol.Required(
-                    CONF_STORE_STATISTICS,
-                    default=user_input.get(CONF_STORE_STATISTICS, True),
-                ): bool,
+                 vol.Required(
+                     CONF_STORE_STATISTICS,
+                     default=user_input.get(CONF_STORE_STATISTICS, True),
+                 ): bool,
+                 vol.Required(
+                     CONF_SETTLEMENT_FACTOR,
+                     default=user_input.get(CONF_SETTLEMENT_FACTOR, 0.8),
+                 ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+
             }
         )
         return data_schema
@@ -353,10 +358,15 @@ class TauronAmiplusOptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_SHOW_CONFIGURABLE_DATE, vol.UNDEFINED
                         ),
                     ): selector({"date": {}}),
-                    vol.Required(
-                        CONF_STORE_STATISTICS,
-                        default=self.get_option(CONF_STORE_STATISTICS, True),
-                    ): bool,
+                     vol.Required(
+                         CONF_STORE_STATISTICS,
+                         default=self.get_option(CONF_STORE_STATISTICS, True),
+                     ): bool,
+                     vol.Required(
+                         CONF_SETTLEMENT_FACTOR,
+                         default=self.get_option(CONF_SETTLEMENT_FACTOR, 0.8),
+                     ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+
                 }
             ),
             errors=errors,

@@ -29,6 +29,7 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
             show_configurable: bool = False,
             show_configurable_date: datetime.date | None = None,
             store_statistics: bool = False,
+            settlement_factor: float = 0.8,
     ):
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=DEFAULT_UPDATE_INTERVAL,
                          update_method=self.update_method)
@@ -43,6 +44,7 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
         self.show_configurable = show_configurable
         self.show_configurable_date = show_configurable_date
         self.store_statistics = store_statistics
+        self.settlement_factor = max(0.0, min(1.0, float(settlement_factor)))
 
     async def update_method(self) -> TauronAmiplusRawData:
         self.log("Starting data update")

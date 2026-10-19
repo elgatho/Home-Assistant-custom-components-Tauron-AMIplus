@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+try:
+    from .hourly_data import parse_raw_payload
+except ImportError:
+    import importlib.util
+    _hourly_spec = importlib.util.spec_from_file_location("hourly_data", Path(__file__).with_name("hourly_data.py"))
+    _hourly_module = importlib.util.module_from_spec(_hourly_spec)
+    import sys
+    sys.modules[_hourly_spec.name] = _hourly_module
+    assert _hourly_spec.loader
+    _hourly_spec.loader.exec_module(_hourly_module)
+    parse_raw_payload = _hourly_module.parse_raw_payload
 
 
 @dataclass
@@ -16,9 +29,94 @@ class Batch:
     verified: bool = False
 
 
+@dataclass(frozen=True)
+class EnergyTotals:
+    consumption: Decimal
+    production: Decimal
+    grid_import: Decimal
+    grid_export: Decimal
+
+    @property
+    def self_consumption_from_production(self) -> Decimal:
+        return self.production - self.grid_export
+
+    @property
+    def self_consumption_from_load(self) -> Decimal:
+        return self.consumption - self.grid_import
+
+    @property
+    def grid_balance(self) -> Decimal:
+        return self.grid_import - self.grid_export
+
+    @property
+    def self_consumption_share(self) -> Decimal | None:
+        if self.production == 0:
+            return None
+        return self.self_consumption_from_production / self.production * 100
+
+
+def _reading_value(reading: dict[str, Any]) -> Decimal | None:
+    try:
+        value = Decimal(str(reading.get("EC")))
+    except (TypeError, ValueError):
+        return None
+    return value if value.is_finite() and value >= 0 else None
+
+
+def calculate_energy_totals(
+    consumption: list[dict[str, Any]],
+    production: list[dict[str, Any]],
+    grid_import: list[dict[str, Any]],
+    grid_export: list[dict[str, Any]],
+) -> EnergyTotals:
+    def total(readings: list[dict[str, Any]]) -> Decimal:
+        return sum((_reading_value(reading) or Decimal("0") for reading in readings), Decimal("0"))
+    return EnergyTotals(total(consumption), total(production), total(grid_import), total(grid_export))
+
+
+def _expire_batches(batches: list[Batch], current: date) -> None:
+    batches[:] = [batch for batch in batches if batch.expires > current and batch.available > 1e-9]
+
+
+def apply_credit_fifo(batches: list[Batch], grid_export: float, grid_import: float, factor: float = 0.8) -> tuple[float, float]:
+    if factor < 0:
+        raise ValueError("factor must not be negative")
+    credit = max(0.0, grid_export) * factor
+    batches.append(Batch("current", credit, date.max, source="calculated_export"))
+    uncovered = apply_fifo(batches, grid_import)
+    batches[:] = [batch for batch in batches if batch.available > 1e-9]
+    return uncovered, sum(batch.available for batch in batches)
+
+
+def serialize_batches(batches: list[Batch]) -> list[dict[str, Any]]:
+    return [{"period": b.period, "available": round(b.available, 9), "expires": b.expires.isoformat(), "source": b.source, "verified": b.verified} for b in batches]
+
+
+def deserialize_batches(items: list[dict[str, Any]]) -> list[Batch]:
+    batches = []
+    for item in items:
+        try:
+            available = float(item["available"])
+            expires = date.fromisoformat(item["expires"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if available > 1e-9:
+            batches.append(Batch(str(item.get("period", "unknown")), available, expires, str(item.get("source", "restored")), bool(item.get("verified", False))))
+    return batches
+
+
 def month_after(year: int, month: int, months: int) -> date:
     index = year * 12 + month - 1 + months
     return date(index // 12, index % 12 + 1, 1)
+
+
+def load_raw_hourly(path: str | Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    series = parse_raw_payload(payload)
+    export = [{"Date": reading.timestamp.isoformat(), "EC": str(reading.value), "Status": reading.status} for reading in series["netto_oze"]]
+    grid_import = [{"Date": reading.timestamp.isoformat(), "EC": str(reading.value), "Status": reading.status} for reading in series["netto"]]
+    tariffs = {str(reading.metadata.get("Taryfa")) for reading in series["netto"] if reading.metadata.get("Taryfa")}
+    return export, grid_import, ",".join(sorted(tariffs)) or "unknown"
 
 
 def load_normalized_raw(path: str | Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
@@ -57,14 +155,34 @@ def apply_fifo(batches: list[Batch], consumption: float) -> float:
     return remaining
 
 
+def calculate_fifo_periods(
+    monthly: dict[str, dict[str, float]],
+    today: date,
+    factor: float = 0.8,
+) -> tuple[list[Batch], float]:
+    batches: list[Batch] = []
+    uncovered = 0.0
+    for period in sorted(monthly):
+        year, month = (int(part) for part in period.split("-"))
+        expires = month_after(year, month, 12)
+        _expire_batches(batches, date(year, month, 1))
+        batches.append(Batch(period, monthly[period].get("export", 0.0) * factor, expires))
+        uncovered += apply_fifo(batches, monthly[period].get("import", 0.0))
+    _expire_batches(batches, today)
+    return batches, uncovered
+
+
 def calculate_monthly_window(
     generation_data: list[dict[str, Any]],
     consumption_data: list[dict[str, Any]],
     today: date,
     completed_months: int = 12,
+    settlement_factor: float = 0.8,
 ) -> tuple[dict[str, Any], float, str]:
     if completed_months < 1:
         raise ValueError("completed_months must be positive")
+    if not 0 <= settlement_factor <= 1:
+        raise ValueError("settlement_factor must be between 0 and 1")
 
     current_month = date(today.year, today.month, 1)
     first_month = month_after(today.year, today.month, -completed_months)
@@ -97,7 +215,7 @@ def calculate_monthly_window(
         year, month = (int(part) for part in period.split("-"))
         expires = month_after(year, month, 12)
         if expires > today and generation_by_period.get(period, 0.0) > 0:
-            batches.append(Batch(period, generation_by_period[period] * 0.8, expires))
+            batches.append(Batch(period, generation_by_period[period] * settlement_factor, expires))
         uncovered_consumption += apply_fifo(batches, consumption_by_period.get(period, 0.0))
     state = {
         "period": today.strftime("%Y-%m"),

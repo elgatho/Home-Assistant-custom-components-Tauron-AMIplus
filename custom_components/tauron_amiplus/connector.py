@@ -13,6 +13,7 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
 
+from .hourly_data import MEASUREMENT_TYPES, parse_daily_endpoint
 from .const import (
     CONST_DATE_FORMAT,
     CONST_MAX_LOOKUP_RANGE,
@@ -38,6 +39,8 @@ class TauronAmiplusRawData:
         self.consumption: Optional[TauronAmiplusDataSet] = None
         self.generation: Optional[TauronAmiplusDataSet] = None
         self.payments: Optional[list[MojTauronPaymentData]] = None
+        self.hourly_series = {}
+        self.hourly_diagnostics = {}
 
     def data_unavailable(self):
         return self.consumption is None or self.generation is None
@@ -81,6 +84,8 @@ class TauronAmiplusRawData:
 
 class TauronAmiplusDataSet:
     def __init__(self):
+        self.hourly_series = {measurement_type: [] for measurement_type in MEASUREMENT_TYPES}
+        self.hourly_diagnostics = {}
         self.json_reading = None
         self.json_daily = None
         self.daily_date = None
@@ -128,6 +133,8 @@ class TauronAmiplusConnector:
         self._show_configurable_date = show_configurable_date
         self._session: ClientSession | None = None
         self._cache = DailyDataCache(meter_id)
+        self.hourly_series = {measurement_type: [] for measurement_type in MEASUREMENT_TYPES}
+        self.hourly_diagnostics = {}
         self._hass = hass
         self._storage_key = f"{STORAGE_KEY_PREFIX}_{config_entry_id}" if config_entry_id is not None else None
 
@@ -430,10 +437,17 @@ class TauronAmiplusConnector:
                 self.add_all_data(values, day)
                 self.log(f"Replaced allData: {values}")
             else:
-                for i, v in enumerate(values["data"]["allData"]):
-                    v["Date"] = day.strftime("%Y-%m-%d")
+                for reading in values["data"]["allData"]:
+                    reading.setdefault("Date", day.strftime("%Y-%m-%d"))
             if all(self.contains_data(a) for a in values["data"]["allData"]):
                 self._cache.add_value(day, generation, values)
+            measurement_type = "oze" if generation else "consum"
+            parsed = parse_daily_endpoint(measurement_type, day.date() if hasattr(day, "date") else day, {"data": values.get("data", {})}, logger=_LOGGER)
+            if parsed is not None:
+                for reading in parsed.readings:
+                    if reading.timestamp not in [item.timestamp for item in self.hourly_series[measurement_type]]:
+                        self.hourly_series[measurement_type].append(reading)
+                self.hourly_diagnostics[str(day.date() if hasattr(day, "date") else day)] = parsed.diagnostics
             values["data"]["allData"] = [
                 d for d in values["data"]["allData"] if self.contains_data(d)
             ]

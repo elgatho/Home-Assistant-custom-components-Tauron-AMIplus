@@ -1,4 +1,5 @@
 """Support for TAURON sensors."""
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -21,7 +22,8 @@ from .const import (CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_12_MONTHS, CONF_SH
                     TYPE_BALANCED_LAST_12_MONTHS, TYPE_BALANCED_MONTHLY, TYPE_BALANCED_YEARLY,
                     TYPE_AMOUNT, TYPE_AMOUNT_PAYMENT, TYPE_ENERGY_STORAGE)
 from .coordinator import TauronAmiplusUpdateCoordinator
-from .energy_storage import calculate_monthly_window, load_normalized_raw
+from .energy_storage import calculate_monthly_window
+from .history_import import async_get_statistics_readings, statistic_id
 from .typing_helpers import TauronAmiplusConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -120,7 +122,8 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
         self._client_name = name
         self._meter_id = meter_id
         self._attr_name = "Domowy magazyn energii"
-        self._attr_unique_id = "domowy_magazyn_energii"
+        self._attr_unique_id = f"tauron_{meter_id}_domowy_magazyn_energii"
+
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_icon = "mdi:home-battery-outline"
         self._state = None
@@ -132,7 +135,17 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
         self._statistics_state = None
         self._statistics_loaded = False
         self._raw_tariff = "G11"
-        self._raw_path = Path(coordinator.hass.config.path("tauron_raw_normalized.json"))
+        self._raw_path = None
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._meter_id)},
+            "name": f"{DEFAULT_NAME} {self._client_name}",
+            "manufacturer": "TAURON",
+            "model": self._meter_id,
+            "configuration_url": CONST_URL_SERVICE,
+        }
 
     @property
     def native_value(self):
@@ -165,16 +178,19 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
             "uncovered_consumption": getattr(self, "_storage_state", {}).get("uncovered_consumption"),
             "window": "last_12_completed_months",
             "tariff": self._raw_tariff,
-            "raw_source": str(self._raw_path),
+            "raw_source": "Home Assistant Recorder",
         }
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
         self._storage_state = await self._storage.async_load()
-        self._handle_coordinator_update()
+        await self._async_update_storage()
 
     def _handle_coordinator_update(self):
-        """Handle updated data from the coordinator."""
+        self.hass.async_create_task(self._async_update_storage())
+
+    async def _async_update_storage(self):
+        """Update the virtual storage without blocking the event loop."""
         _LOGGER.debug(f"Updating energy storage sensor for meter: {self._meter_id}")
         try:
             initial_state = 0.0
@@ -186,25 +202,28 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
                 self.async_write_ha_state()
                 return
 
-            if self._raw_path.is_file():
-                generation_data, consumption_data, self._raw_tariff = load_normalized_raw(self._raw_path)
-                accuracy = "raw_hourly_fifo"
-            else:
-                generation_data = getattr(data.generation, "json_last_12_months_hourly", None)
-                consumption_data = getattr(data.consumption, "json_last_12_months_hourly", None)
-                if not generation_data or not consumption_data:
-                    self._state = None
-                    self._available = False
-                    self.async_write_ha_state()
-                    return
-                generation_data = generation_data["data"]["allData"]
-                consumption_data = consumption_data["data"]["allData"]
-                accuracy = "coordinator_last_12_months"
+            end = datetime.datetime.now(datetime.timezone.utc)
+            start = end - datetime.timedelta(days=370)
+            generation_data = await async_get_statistics_readings(
+                self.hass, statistic_id(self._meter_id, "netto_oze"), start, end
+            )
+            consumption_data = await async_get_statistics_readings(
+                self.hass, statistic_id(self._meter_id, "netto"), start, end
+            )
+            if not generation_data or not consumption_data:
+                self._state = None
+                self._available = False
+                self.async_write_ha_state()
+                return
+            accuracy = "recorder_hourly_fifo_netto"
             state, storage_value, _ = calculate_monthly_window(
                 generation_data,
                 consumption_data,
                 datetime.date.today(),
+                settlement_factor=self.coordinator.settlement_factor,
             )
+            state["settlement_factor"] = self.coordinator.settlement_factor
+            state["official_tauron_balance"] = False
             self._storage_state = state
             self.hass.async_create_task(self._storage.async_save(state))
             self._state = storage_value
