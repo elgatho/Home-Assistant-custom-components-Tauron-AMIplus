@@ -279,8 +279,13 @@ class TauronAmiplusFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                      CONF_SETTLEMENT_FACTOR,
                      default=user_input.get(CONF_SETTLEMENT_FACTOR, 0.8),
                  ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+                 vol.Optional(
+                     CONF_ENERGY_STORAGE_RESET_DATE,
+                     default=user_input.get(CONF_ENERGY_STORAGE_RESET_DATE),
+                 ): selector({"date": {}}),
 
-            }
+             }
+
         )
         return data_schema
 
@@ -363,11 +368,18 @@ class TauronAmiplusOptionsFlowHandler(config_entries.OptionsFlow):
                          default=self.get_option(CONF_STORE_STATISTICS, True),
                      ): bool,
                      vol.Required(
-                         CONF_SETTLEMENT_FACTOR,
-                         default=self.get_option(CONF_SETTLEMENT_FACTOR, 0.8),
-                     ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+    CONF_SETTLEMENT_FACTOR,
+    CONF_ENERGY_STORAGE_RESET_DATE,
 
-                }
+                         default=self.get_option(CONF_SETTLEMENT_FACTOR, 0.8),
+                          ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+                     vol.Optional(
+                         CONF_ENERGY_STORAGE_RESET_DATE,
+                         default=self.get_option(CONF_ENERGY_STORAGE_RESET_DATE, vol.UNDEFINED),
+                     ): selector({"date": {}}),
+
+                 }
+
             ),
             errors=errors,
         )

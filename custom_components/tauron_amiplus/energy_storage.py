@@ -184,7 +184,7 @@ def calculate_monthly_window(
     if not 0 <= settlement_factor <= 1:
         raise ValueError("settlement_factor must be between 0 and 1")
 
-    current_month = date(today.year, today.month, 1)
+    current_month = month_after(today.year, today.month, 1)
     first_month = month_after(today.year, today.month, -completed_months)
     generation_by_period: dict[str, float] = {}
     consumption_by_period: dict[str, float] = {}

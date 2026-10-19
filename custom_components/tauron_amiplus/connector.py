@@ -138,33 +138,38 @@ class TauronAmiplusConnector:
         self._hass = hass
         self._storage_key = f"{STORAGE_KEY_PREFIX}_{config_entry_id}" if config_entry_id is not None else None
 
-    async def get_raw_data(self) -> TauronAmiplusRawData:
+    async def get_raw_data(self, include_statistics: bool = True) -> TauronAmiplusRawData:
         data = TauronAmiplusRawData()
         # data.payments = await self.get_moj_tauron()
         data.tariff = await self.login()
         generation_max_cache = datetime.datetime.now()
-        data.consumption, consumption_max_cache = await self.get_data_set(generation=False)
+        data.consumption, consumption_max_cache = await self.get_data_set(
+            generation=False, include_statistics=include_statistics
+        )
         if self._show_generation or self._show_balanced:
-            data.generation, generation_max_cache = await self.get_data_set(generation=True)
+            data.generation, generation_max_cache = await self.get_data_set(
+                generation=True, include_statistics=include_statistics
+            )
         else:
             data.generation = TauronAmiplusDataSet()
         self._cache.delete_older_than(min(consumption_max_cache, generation_max_cache))
         return data
 
-    async def get_data_set(self, generation) -> Tuple[TauronAmiplusDataSet, datetime.datetime]:
+    async def get_data_set(self, generation, include_statistics: bool = True) -> Tuple[TauronAmiplusDataSet, datetime.datetime]:
         dataset = TauronAmiplusDataSet()
         dataset.json_reading = await self.get_reading(generation)
         dataset.json_daily, dataset.daily_date = await self.get_values_daily(generation)
         dataset.json_monthly = await self.get_values_monthly(generation)
         dataset.json_yearly = await self.get_values_yearly(generation)
         dataset.json_month_hourly = await self.get_values_month_hourly(generation)
-        dataset.json_last_30_days_hourly = await self.get_values_last_30_days_hourly(generation)
+        if include_statistics:
+            dataset.json_last_30_days_hourly = await self.get_values_last_30_days_hourly(generation)
         now = datetime.datetime.now()
         cache_max = datetime.datetime.now() - datetime.timedelta(days=32)
-        if self._show_12_months:
+        if self._show_12_months and include_statistics:
             dataset.json_last_12_months_hourly = await self.get_values_12_months_hourly(generation)
             cache_max = now.replace(year=now.year - 1) - datetime.timedelta(days=2)
-        if self._show_balanced_yearly:
+        if self._show_balanced_yearly and include_statistics:
             dataset.json_year_hourly = await self.get_values_year_hourly(generation)
             potential_max = now.replace(day=1, month=1)
             if potential_max < cache_max:

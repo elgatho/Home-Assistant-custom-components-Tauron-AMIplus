@@ -15,6 +15,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .connector import TauronAmiplusRawData
 from .const import (CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_12_MONTHS, CONF_SHOW_BALANCED, CONF_SHOW_BALANCED_YEAR,
+                     CONF_ENERGY_STORAGE_RESET_DATE,
+
                     CONF_SHOW_CONFIGURABLE, CONF_SHOW_CONFIGURABLE_DATE, CONF_SHOW_GENERATION, CONF_TARIFF,
                     CONST_BALANCED, CONST_CONFIGURABLE, CONST_DAILY, CONST_GENERATION,
                     CONST_LAST_12_MONTHS, CONST_MONTHLY, CONST_READING, CONST_URL_SERVICE, CONST_YEARLY, DEFAULT_NAME,
@@ -176,7 +178,8 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
             "model": "last_12_months_monthly_fifo_approximation",
             "period": getattr(self, "_storage_state", {}).get("period"),
             "uncovered_consumption": getattr(self, "_storage_state", {}).get("uncovered_consumption"),
-            "window": "last_12_completed_months",
+            "window": f"from_{self.coordinator.energy_storage_reset_date.isoformat()}" if self.coordinator.energy_storage_reset_date else "last_12_months",
+            "reset_date": self.coordinator.energy_storage_reset_date.isoformat() if self.coordinator.energy_storage_reset_date else None,
             "tariff": self._raw_tariff,
             "raw_source": "Home Assistant Recorder",
         }
@@ -203,7 +206,12 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
                 return
 
             end = datetime.datetime.now(datetime.timezone.utc)
-            start = end - datetime.timedelta(days=370)
+            reset_date = self.coordinator.energy_storage_reset_date
+            start = (
+                datetime.datetime.combine(reset_date, datetime.time.min, tzinfo=datetime.timezone.utc)
+                if reset_date is not None
+                else end - datetime.timedelta(days=370)
+            )
             generation_data = await async_get_statistics_readings(
                 self.hass, statistic_id(self._meter_id, "netto_oze"), start, end
             )

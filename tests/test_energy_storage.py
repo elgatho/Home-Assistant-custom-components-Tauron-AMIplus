@@ -61,6 +61,25 @@ def test_raw_loader_uses_netto_series(tmp_path):
     assert grid_import[0]["EC"] == "2"
 
 
+def test_reset_period_matches_september_and_october_surplus():
+    state, value, _ = calculate_monthly_window(
+        [
+            {"Date": "2026-09-01T00:00:00+02:00", "EC": "615.319"},
+            {"Date": "2026-10-01T00:00:00+02:00", "EC": "362.361"},
+        ],
+        [
+            {"Date": "2026-09-01T00:00:00+02:00", "EC": "405.036"},
+            {"Date": "2026-10-01T00:00:00+02:00", "EC": "213.374"},
+        ],
+        date(2026, 10, 20),
+        completed_months=2,
+        settlement_factor=0.8,
+    )
+    assert round(value, 3) == 163.734
+    assert round(state["generation"], 3) == 977.680
+    assert round(state["consumption"], 3) == 618.410
+
+
 def test_fifo_state_round_trips():
     original = [Batch("2024-01", 1.25, date(2025, 2, 1), "source", True)]
     restored = deserialize_batches(serialize_batches(original))

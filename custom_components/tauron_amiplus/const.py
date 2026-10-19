@@ -20,6 +20,7 @@ CONF_SHOW_CONFIGURABLE = "show_configurable_sensors"
 CONF_SHOW_CONFIGURABLE_DATE = "show_configurable_sensors_date"
 CONF_STORE_STATISTICS = "store_statistics"
 CONF_SETTLEMENT_FACTOR = "settlement_factor"
+CONF_ENERGY_STORAGE_RESET_DATE = "energy_storage_reset_date"
 DEFAULT_SETTLEMENT_FACTOR = 0.8
 CONST_DATE_FORMAT = "%d.%m.%Y"
 CONST_MAX_LOOKUP_RANGE = 7
