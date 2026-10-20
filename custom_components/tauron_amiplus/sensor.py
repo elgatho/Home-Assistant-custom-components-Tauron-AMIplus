@@ -11,6 +11,7 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import CONF_MONITORED_VARIABLES, CONF_NAME, CONF_PASSWORD, CONF_USERNAME, UnitOfEnergy
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .connector import TauronAmiplusRawData
@@ -90,15 +91,26 @@ async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_ent
         sensor_types = {
             k: v for k, v in sensor_types.items() if (not k.startswith(CONST_BALANCED)) or k.endswith(CONST_YEARLY)
         }
-    if not show_12_months:
-        sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_LAST_12_MONTHS)}
+    sensor_types[TYPE_BALANCED_LAST_12_MONTHS] = SENSOR_TYPES[TYPE_BALANCED_LAST_12_MONTHS]
     sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_CONFIGURABLE)}
+    last_12_months_types = {k: v for k, v in sensor_types.items() if k.endswith(CONST_LAST_12_MONTHS)}
+    sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_LAST_12_MONTHS)}
     if TYPE_ENERGY_STORAGE in sensor_types and show_generation_sensors and show_balanced:
         energy_storage_sensor = TauronAmiplusEnergyStorageSensor(coordinator, meter_name or name, meter_id)
         sensors.append(energy_storage_sensor)
         sensor_types = {k: v for k, v in sensor_types.items() if k != TYPE_ENERGY_STORAGE}
     else:
         sensor_types = {k: v for k, v in sensor_types.items() if k != TYPE_ENERGY_STORAGE}
+
+    for sensor_type, sensor_type_config in last_12_months_types.items():
+        sensors.append(
+            TauronAmiplusRecorderLast12MonthsSensor(
+                coordinator,
+                sensor_type_config["name"],
+                meter_id,
+                sensor_type,
+            )
+        )
 
     for sensor_type, sensor_type_config in sensor_types.items():
         sensors.append(
@@ -300,6 +312,9 @@ class TauronAmiplusSensor(SensorEntity, CoordinatorEntity):
         return self._state_class
 
     def _handle_coordinator_update(self) -> None:
+        if self._sensor_type == TYPE_BALANCED_LAST_12_MONTHS:
+            self.hass.async_create_task(self._async_update_last_12_months_balance())
+            return
         self.log(f"Updating data for entry: {self._sensor_type}")
         data: TauronAmiplusRawData = self.coordinator.data
         self.log(f"DATA: {data}")
@@ -342,6 +357,34 @@ class TauronAmiplusSensor(SensorEntity, CoordinatorEntity):
         self._state = reading["C"]
         partials = {s: reading[s] for s in ["S1", "S2", "S3"] if s in reading and reading[s] is not None}
         self._params = {"date": reading["Date"], **partials}
+
+    async def _async_update_last_12_months_balance(self) -> None:
+        end = datetime.datetime.now(datetime.timezone.utc)
+        start = end - datetime.timedelta(days=365)
+        consumption_data = await async_get_statistics_readings(
+            self.hass, statistic_id(self._meter_id, "netto"), start, end
+        )
+        generation_data = await async_get_statistics_readings(
+            self.hass, statistic_id(self._meter_id, "netto_oze"), start, end
+        )
+        if not consumption_data and not generation_data:
+            self._state = None
+            self._params = {
+                "data_range": f"{start.date()} - {end.date()}",
+                "raw_source": "Home Assistant Recorder",
+            }
+            self.async_write_ha_state()
+            return
+        sum_consumption = sum(float(item["sum"]) for item in consumption_data)
+        sum_generation = sum(float(item["sum"]) for item in generation_data)
+        self._state = round(sum_consumption - sum_generation, 3)
+        self._params = {
+            "sum_consumption": round(sum_consumption, 3),
+            "sum_generation": round(sum_generation, 3),
+            "data_range": f"{start.date()} - {end.date()}",
+            "raw_source": "Home Assistant Recorder",
+        }
+        self.async_write_ha_state()
 
     def update_values(self, json_data):
         total, zones, data_range = TauronAmiplusSensor.get_data_from_json(json_data)
@@ -453,3 +496,81 @@ class TauronAmiplusConfigFlowSensor(TauronAmiplusSensor):
     def unique_id(self):
         """Return a unique ID."""
         return f"tauron-{self._meter_id}-{self._sensor_type.lower()}"
+
+
+class TauronAmiplusRecorderLast12MonthsSensor(SensorEntity, CoordinatorEntity):
+    """Last 12 months energy sensor computed from recorder statistics."""
+
+    def __init__(self, coordinator: TauronAmiplusUpdateCoordinator, name: str, meter_id: str, sensor_type: str):
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._client_name = name
+        self._meter_id = meter_id
+        self._sensor_type = sensor_type
+        self._generation = CONST_GENERATION in sensor_type
+        self._measurement_type = "netto_oze" if self._generation else "netto"
+        self._state = None
+        self._available = True
+        self._attr_unique_id = f"tauron-{meter_id}-{sensor_type.lower()}-recorder"
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_icon = "mdi:calendar-month"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._meter_id)},
+            "name": f"{DEFAULT_NAME} {self._meter_id}",
+            "manufacturer": "TAURON",
+            "model": self._meter_id,
+            "configuration_url": CONST_URL_SERVICE,
+        }
+
+    @property
+    def native_value(self):
+        """Return the state of the sensor."""
+        return self._state
+
+    @property
+    def available(self):
+        """Return if the sensor is available."""
+        return self._available
+
+    @property
+    def extra_state_attributes(self):
+        """Return additional state attributes."""
+        return {
+            "source": statistic_id(self._meter_id, self._measurement_type),
+            "data_source": "Home Assistant Recorder",
+            "period": "last_12_months",
+        }
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        await self._async_update_from_recorder()
+
+    def _handle_coordinator_update(self) -> None:
+        self.hass.async_create_task(self._async_update_from_recorder())
+
+    async def _async_update_from_recorder(self):
+        """Compute the rolling 12-month sum from recorder statistics."""
+        _LOGGER.debug(f"Updating 12-month recorder sensor for meter: {self._meter_id}")
+        try:
+            end = datetime.datetime.now(datetime.timezone.utc)
+            start = end - datetime.timedelta(days=365)
+            readings = await async_get_statistics_readings(
+                self.hass, statistic_id(self._meter_id, self._measurement_type), start, end
+            )
+            total = sum(float(reading.get("EC", 0.0) or 0.0) for reading in readings) if readings else None
+            if total is None:
+                self._state = None
+                self._available = False
+            else:
+                self._state = round(total, 2)
+                self._available = True
+        except (HomeAssistantError, ValueError, TypeError, KeyError) as err:
+            _LOGGER.warning(f"Failed to read recorder statistics for meter {self._meter_id}: {err}")
+            self._state = None
+            self._available = False
+        self.async_write_ha_state()
