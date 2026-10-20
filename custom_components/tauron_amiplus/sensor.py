@@ -109,6 +109,7 @@ async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_ent
                 sensor_type_config["name"],
                 meter_id,
                 sensor_type,
+                meter_name,
             )
         )
 
@@ -502,17 +503,27 @@ class TauronAmiplusConfigFlowSensor(TauronAmiplusSensor):
 class TauronAmiplusRecorderLast12MonthsSensor(SensorEntity, CoordinatorEntity):
     """Last 12 months energy sensor computed from recorder statistics."""
 
-    def __init__(self, coordinator: TauronAmiplusUpdateCoordinator, name: str, meter_id: str, sensor_type: str):
+    def __init__(self, coordinator: TauronAmiplusUpdateCoordinator, name: str, meter_id: str, sensor_type: str,
+                 meter_name: str):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._client_name = name
         self._meter_id = meter_id
         self._sensor_type = sensor_type
-        self._generation = CONST_GENERATION in sensor_type
-        self._measurement_type = "netto_oze" if self._generation else "netto"
+        # consum/oze = raw grid import/export (same series as daily/monthly/yearly sensors);
+        # balance = hourly-balanced netto - netto_oze (same as get_balanced_data).
+        if sensor_type.startswith(CONST_BALANCED):
+            self._measurement_types = ("netto", "netto_oze")
+        elif sensor_type.startswith(CONST_GENERATION):
+            self._measurement_types = ("oze",)
+        else:
+            self._measurement_types = ("consum",)
         self._state = None
+        self._params = {}
         self._available = True
-        self._attr_unique_id = f"tauron-{meter_id}-{sensor_type.lower()}-recorder"
+        self._attr_name = f"{DEFAULT_NAME} {meter_name} {name}"
+        # Same unique_id as the former config-flow sensor so existing entity_ids keep working.
+        self._attr_unique_id = f"tauron-{meter_id}-{sensor_type.lower()}"
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL
@@ -542,9 +553,10 @@ class TauronAmiplusRecorderLast12MonthsSensor(SensorEntity, CoordinatorEntity):
     def extra_state_attributes(self):
         """Return additional state attributes."""
         return {
-            "source": statistic_id(self._meter_id, self._measurement_type),
+            "source": [statistic_id(self._meter_id, m) for m in self._measurement_types],
             "data_source": "Home Assistant Recorder",
             "period": "last_12_months",
+            **self._params,
         }
 
     async def async_added_to_hass(self):
@@ -560,15 +572,20 @@ class TauronAmiplusRecorderLast12MonthsSensor(SensorEntity, CoordinatorEntity):
         try:
             end = datetime.datetime.now(datetime.timezone.utc)
             start = end - datetime.timedelta(days=365)
-            readings = await async_get_statistics_readings(
-                self.hass, statistic_id(self._meter_id, self._measurement_type), start, end
-            )
-            total = sum(float(reading.get("EC", 0.0) or 0.0) for reading in readings) if readings else None
-            if total is None:
+            sums = []
+            for measurement_type in self._measurement_types:
+                readings = await async_get_statistics_readings(
+                    self.hass, statistic_id(self._meter_id, measurement_type), start, end
+                )
+                sums.append(sum(float(r.get("EC") or 0.0) for r in readings) if readings else None)
+            if any(s is None for s in sums):
                 self._state = None
                 self._available = False
             else:
-                self._state = round(total, 2)
+                self._state = round(sums[0] - sum(sums[1:]), 3)
+                self._params = {"data_range": f"{start.date()} - {end.date()}"}
+                if len(sums) == 2:
+                    self._params |= {"sum_consumption": round(sums[0], 3), "sum_generation": round(sums[1], 3)}
                 self._available = True
         except (HomeAssistantError, ValueError, TypeError, KeyError) as err:
             _LOGGER.warning(f"Failed to read recorder statistics for meter {self._meter_id}: {err}")
