@@ -92,11 +92,12 @@ async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_ent
         }
     if not show_12_months:
         sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_LAST_12_MONTHS)}
-    if not show_configurable:
-        sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_CONFIGURABLE)}
-    if TYPE_ENERGY_STORAGE in sensor_types:
+    sensor_types = {k: v for k, v in sensor_types.items() if not k.endswith(CONST_CONFIGURABLE)}
+    if TYPE_ENERGY_STORAGE in sensor_types and show_generation_sensors and show_balanced:
         energy_storage_sensor = TauronAmiplusEnergyStorageSensor(coordinator, meter_name or name, meter_id)
         sensors.append(energy_storage_sensor)
+        sensor_types = {k: v for k, v in sensor_types.items() if k != TYPE_ENERGY_STORAGE}
+    else:
         sensor_types = {k: v for k, v in sensor_types.items() if k != TYPE_ENERGY_STORAGE}
 
     for sensor_type, sensor_type_config in sensor_types.items():

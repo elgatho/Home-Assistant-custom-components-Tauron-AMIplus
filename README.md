@@ -24,13 +24,54 @@
 
 # Tauron AMIplus sensor
 
-This sensor uses unofficial API to get energy usage and generation data from [*TAURON eLicznik*](https://elicznik.tauron-dystrybucja.pl).
+This integration retrieves energy consumption and generation data from the unofficial [TAURON eLicznik](https://elicznik.tauron-dystrybucja.pl) API.
+
+## Fork and acknowledgements
+
+This repository is a community fork of the original project by [Piotr Machowski](https://github.com/PiotrMachowski).
+
+Kudos to the original author for creating and maintaining the integration, reverse-engineering the eLicznik API, and providing the initial Home Assistant implementation. This fork was created because the original project was no longer receiving updates required for current Home Assistant versions and changes in the TAURON service.
+
+The fork keeps the original project’s credit and license. It is not affiliated with or endorsed by TAURON.
+
+## How it works
+
+The integration logs in to eLicznik and periodically reads the current meter data. Depending on the selected options, it also reads daily, monthly, yearly, and hourly data.
+
+Statistics are handled separately from the current-value sensors:
+
+- Home Assistant Recorder is the primary source for already stored long-term statistics.
+- The integration queries the TAURON API only for the missing or recent range needed to extend the statistics.
+- Current readings and summary values are still obtained from the TAURON API because they are live values, not Recorder history.
+- Recorder statistics are exposed under the `tauron_importer` source and can be used by the Home Assistant Energy dashboard.
+- The first synchronization after a fresh installation can take longer because the missing history has to be downloaded. Later synchronizations should be incremental.
 
 ## Configuration
 
+The integration can be configured through the Home Assistant UI or, for legacy installations, through YAML. The UI config flow is recommended.
+
 ### Config flow (recommended)
 
-To configure this integration go to: _Configuration_ -> _Integrations_ -> _Add integration_ -> _Tauron AMIplus_.
+To configure this integration go to: _Settings_ -> _Devices & services_ -> _Add integration_ -> _Tauron AMIplus_.
+
+The setup consists of:
+
+1. TAURON eLicznik username and password.
+2. Meter selection from the meters available in the account.
+3. Optional sensors and statistics settings.
+
+The main options are:
+
+| Option | Description |
+|---|---|
+| Generation sensors | Adds sensors for energy produced by the installation. |
+| Last 12 months sensors | Adds rolling 12-month consumption, generation, and balance sensors. |
+| Balanced sensors | Adds balance sensors comparing consumption with generation. |
+| Balanced yearly sensors | Adds yearly balance data. |
+| Configurable sensors | Adds a sensor for a user-selected historical start date. This option can require more API requests. |
+| Store statistics | Stores hourly data in Home Assistant Recorder statistics under `tauron_importer`. Enable this when using the Energy dashboard or long-term history. |
+| Settlement factor | Factor used by the virtual energy storage and balancing calculations. The value must be between `0` and `1`; the default is `0.8`. |
+| Energy storage reset date | Optional date from which the virtual energy storage calculation starts. |
 
 You can also use following [My Home Assistant](http://my.home-assistant.io/) link:
 
@@ -71,6 +112,9 @@ You can also use following [My Home Assistant](http://my.home-assistant.io/) lin
 | `balanced_monthly`           | Monthly balance                                  |
 | `balanced_yearly`            | Yearly balance                                   |
 | `balanced_last_12_months`    | Balance for last 12 months                       |
+| `balanced_configurable`      | Balance from the configured historical start date |
+| `energy_storage`             | Virtual home energy storage calculated from consumption and generation |
+| `amount`                     | Current amount/payment information when available |
 
 #### Example usage
 
@@ -101,6 +145,31 @@ sensor:
 
 </details>
 
+## Sensors
+
+All energy sensors use `kWh` and are created with a name containing the configured meter name. Exact entity IDs depend on the meter ID and the selected options.
+
+### Consumption and generation
+
+- **Current reading**: the latest cumulative meter reading returned by TAURON.
+- **Daily energy**: energy for the previous completed day. The previous-day behavior is intentional because the current day may still be incomplete.
+- **Monthly energy**: energy accumulated in the current calendar month.
+- **Yearly energy**: energy accumulated in the current calendar year.
+- **Last 12 months energy**: rolling total covering the previous 12 months.
+
+The same groups are available for consumption and, when generation is enabled, for energy generation.
+
+### Balance sensors
+
+Balance sensors compare consumption and generation for the selected period. Positive and negative values indicate the direction of the balance according to the data returned by TAURON. Daily, monthly, yearly, rolling 12-month, and configurable-period variants are available depending on the enabled options.
+
+### Virtual energy storage
+
+The virtual energy storage sensor estimates available stored energy using generation credits and consumption. It uses Recorder statistics rather than re-downloading the complete history on every update. The settlement factor and reset date affect this calculation.
+
+### Recorder statistics
+
+When **Store statistics** is enabled, hourly statistics are written to the `tauron_importer` source. The integration checks the latest stored Recorder point and requests only the recent or missing range from TAURON. The Home Assistant Energy dashboard should use the `tauron_importer` statistics rather than entity state sensors for hourly charts.
 
 ## Installation
 
@@ -137,7 +206,7 @@ Then restart Home Assistant before applying configuration file changes.
 
 * **Why there are missing days in statistics/Energy dashboard?**
 
-  Such gaps appear when there are missing values in hourly readings for this day.
+  Such gaps appear when there are missing values in hourly readings for this day. The integration does not invent missing measurements; it waits until the values are available in eLicznik and then fills the missing range.
   You can confirm it using [eLicznik website](https://elicznik.tauron-dystrybucja.pl).
   
 * **How to fix missing data in statistics/Energy dashboard?**
