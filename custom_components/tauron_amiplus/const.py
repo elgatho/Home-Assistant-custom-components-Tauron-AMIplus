@@ -1,5 +1,5 @@
 """Constants for tauron."""
-from datetime import timedelta
+from datetime import date, timedelta
 
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import Platform
@@ -22,6 +22,8 @@ CONF_STORE_STATISTICS = "store_statistics"
 CONF_SETTLEMENT_FACTOR = "settlement_factor"
 CONF_ENERGY_STORAGE_RESET_DATE = "energy_storage_reset_date"
 DEFAULT_SETTLEMENT_FACTOR = 0.8
+# Virtual storage (net-billing 1:0.8) starts accruing from this date with a 0 kWh balance.
+DEFAULT_ENERGY_STORAGE_RESET_DATE = date(2025, 9, 1)
 CONST_DATE_FORMAT = "%d.%m.%Y"
 CONST_MAX_LOOKUP_RANGE = 7
 CONST_URL_LOGIN = "https://logowanie.tauron-dystrybucja.pl/login"

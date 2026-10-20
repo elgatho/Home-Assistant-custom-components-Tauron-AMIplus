@@ -13,7 +13,7 @@ from homeassistant.util.dt import DATE_STR_FORMAT, parse_date
 
 from .const import (
     CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_12_MONTHS, CONF_SHOW_BALANCED, CONF_SHOW_BALANCED_YEAR,
-    CONF_SHOW_CONFIGURABLE, CONF_SHOW_CONFIGURABLE_DATE, CONF_SHOW_GENERATION, CONF_STORE_STATISTICS, CONF_SETTLEMENT_FACTOR, CONF_ENERGY_STORAGE_RESET_DATE, CONF_TARIFF,
+    CONF_SHOW_CONFIGURABLE, CONF_SHOW_CONFIGURABLE_DATE, CONF_SHOW_GENERATION, CONF_STORE_STATISTICS, CONF_SETTLEMENT_FACTOR, CONF_ENERGY_STORAGE_RESET_DATE, CONF_TARIFF, DEFAULT_ENERGY_STORAGE_RESET_DATE,
     DOMAIN, PLATFORMS,
 )
 from .coordinator import TauronAmiplusUpdateCoordinator
@@ -71,6 +71,8 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: TauronAmiplusConf
     energy_storage_reset_date = config_entry.options.get(CONF_ENERGY_STORAGE_RESET_DATE)
     if energy_storage_reset_date:
         energy_storage_reset_date = parse_date(energy_storage_reset_date)
+    else:
+        energy_storage_reset_date = DEFAULT_ENERGY_STORAGE_RESET_DATE
     if show_configurable_date is not None:
         show_configurable_date = parse_date(show_configurable_date)
     else:

@@ -242,6 +242,7 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
                 consumption_data,
                 datetime.date.today(),
                 settlement_factor=self.coordinator.settlement_factor,
+                window_start=reset_date,
             )
             state["settlement_factor"] = self.coordinator.settlement_factor
             state["official_tauron_balance"] = False

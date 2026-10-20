@@ -178,6 +178,7 @@ def calculate_monthly_window(
     today: date,
     completed_months: int = 12,
     settlement_factor: float = 0.8,
+    window_start: date | None = None,
 ) -> tuple[dict[str, Any], float, str]:
     if completed_months < 1:
         raise ValueError("completed_months must be positive")
@@ -185,7 +186,12 @@ def calculate_monthly_window(
         raise ValueError("settlement_factor must be between 0 and 1")
 
     current_month = month_after(today.year, today.month, 1)
-    first_month = month_after(today.year, today.month, -completed_months)
+    # A fixed window_start pins the first accounted month (e.g. 2025-09-01) and
+    # excludes everything before it; without it, fall back to a rolling window.
+    if window_start is not None:
+        first_month = date(window_start.year, window_start.month, 1)
+    else:
+        first_month = month_after(today.year, today.month, -completed_months)
     generation_by_period: dict[str, float] = {}
     consumption_by_period: dict[str, float] = {}
     for item, target in ((generation_data, generation_by_period), (consumption_data, consumption_by_period)):

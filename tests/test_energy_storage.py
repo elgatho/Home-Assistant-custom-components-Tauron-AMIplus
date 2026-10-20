@@ -80,6 +80,57 @@ def test_reset_period_matches_september_and_october_surplus():
     assert round(state["consumption"], 3) == 618.410
 
 
+SEP = "2025-09-15T00:00:00+02:00"
+AUG = "2025-08-15T00:00:00+02:00"
+
+
+def test_window_start_excludes_data_before_reset_date():
+    # A 1000 kWh export in Aug 2025 must be ignored; only the 100 kWh Sep export counts (*0.8).
+    state, value, _ = calculate_monthly_window(
+        [{"Date": AUG, "EC": "1000"}, {"Date": SEP, "EC": "100"}],
+        [],
+        date(2025, 9, 20),
+        window_start=date(2025, 9, 1),
+        settlement_factor=0.8,
+    )
+    assert value == 80
+    assert state["generation"] == 100
+    assert state["window_start"] == "2025-09-01"
+
+
+def test_initial_balance_is_zero_no_seeded_credit():
+    # Consumption with no prior export => balance stays 0, nothing is injected from history/cache.
+    state, value, _ = calculate_monthly_window(
+        [],
+        [{"Date": SEP, "EC": "50"}],
+        date(2025, 9, 20),
+        window_start=date(2025, 9, 1),
+    )
+    assert value == 0
+    assert state["uncovered_consumption"] == 50
+    assert state["batches"] == []
+
+
+def test_recompute_is_idempotent_no_double_counting():
+    # The sensor fully recomputes from the recorder each update; repeated calls must not accumulate.
+    args = ([{"Date": SEP, "EC": "100"}], [{"Date": SEP, "EC": "30"}], date(2025, 9, 20))
+    kwargs = {"window_start": date(2025, 9, 1), "settlement_factor": 0.8}
+    first = calculate_monthly_window(*args, **kwargs)[1]
+    second = calculate_monthly_window(*args, **kwargs)[1]
+    assert first == second == 50  # 100*0.8 - 30
+
+
+def test_surplus_expires_12_months_after_creation_month():
+    # Sep 2025 surplus is gone once the 12-month FIFO window rolls past it.
+    _, value, _ = calculate_monthly_window(
+        [{"Date": SEP, "EC": "100"}],
+        [],
+        date(2026, 10, 20),
+        window_start=date(2025, 9, 1),
+    )
+    assert value == 0
+
+
 def test_fifo_state_round_trips():
     original = [Batch("2024-01", 1.25, date(2025, 2, 1), "source", True)]
     restored = deserialize_batches(serialize_batches(original))
