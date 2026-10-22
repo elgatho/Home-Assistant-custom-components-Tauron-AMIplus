@@ -70,7 +70,7 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
             _LOGGER.info("[%s]: Tariff changed from %s to %s", self.meter_id, self._last_tariff, tariff)
         self._last_tariff = tariff
         registry = dr.async_get(self.hass)
-        device = registry.async_get_device(identifiers={(DOMAIN, self.meter_id)})
+        device = next((d for d in registry.devices.values() if (DOMAIN, self.meter_id) in d.identifiers), None)
         if device is not None:
             registry.async_update_device(device.id, sw_version=f"Tariff {tariff}")
 

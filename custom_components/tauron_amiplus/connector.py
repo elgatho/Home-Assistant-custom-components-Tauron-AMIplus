@@ -603,6 +603,7 @@ class DailyDataCache:
         return date_str in self._consumption_data
 
     def add_value(self, date: datetime.datetime, generation: bool, value):
+        date = date.replace(tzinfo=None)
         date_str = self._format_date(date)
         if value is None:
             return
@@ -622,6 +623,7 @@ class DailyDataCache:
         return None
 
     def delete_older_than(self, date: datetime.datetime):
+        date = date.replace(tzinfo=None)
         if date > self._max_date:
             for d in [self._max_date + datetime.timedelta(days=x) for x in range((date - self._max_date).days)]:
                 self.delete_day(d)
