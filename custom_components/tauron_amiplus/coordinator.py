@@ -2,6 +2,7 @@
 import datetime
 import logging
 
+from homeassistant.components.recorder import get_instance
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -49,17 +50,26 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
         self.settlement_factor = max(0.0, min(1.0, float(settlement_factor)))
         self.energy_storage_reset_date = energy_storage_reset_date
         self._last_tariff = None
+        self._statistics_task = None
+        self._history_ready = False
+        self._zones_name = {}
+        self._statistics = TauronAmiplusStatisticsUpdater(hass, self.connector, meter_id, meter_name,
+                                                          show_generation, show_balanced)
         self._config_entry_id = config_entry_id
 
     async def update_method(self) -> TauronAmiplusRawData:
+        """Only tariff and meter readings come from the API on every refresh; everything else is read from the Recorder."""
         self.log("Starting data update")
-        data = await self._update()
+        data = await self.connector.get_light_data()
         self._sync_device_tariff(data)
-        self.log("Downloaded current data; Recorder remains the statistics source")
-        if data is not None and self.store_statistics:
-            self.log("Starting incremental statistics update")
-            await self.generate_statistics(data)
-            self.log("Updated missing statistics")
+        if not self._zones_name:
+            self._zones_name = await self.connector.get_zones_name()
+        if not self._history_ready:
+            # The first synchronisation can take long (12 months of history): run it in the background
+            self._schedule_first_sync()
+            return data
+        await self.generate_statistics()
+        await self._fill_from_recorder(data)
         return data
 
     def _sync_device_tariff(self, data) -> None:
@@ -69,19 +79,52 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
             return
         if self._last_tariff is not None:
             _LOGGER.info("[%s]: Tariff changed from %s to %s", self.meter_id, self._last_tariff, tariff)
+            self._zones_name = {}
         self._last_tariff = tariff
         registry = dr.async_get(self.hass)
         device = next((d for d in dr.async_entries_for_config_entry(registry, self._config_entry_id) if (DOMAIN, self.meter_id) in d.identifiers), None)
         if device is not None:
             registry.async_update_device(device.id, sw_version=f"Tariff {tariff}")
 
-    async def generate_statistics(self, data):
-        statistics_updater = TauronAmiplusStatisticsUpdater(self.hass, self.connector, self.meter_id, self.meter_name,
-                                                            self.show_generation, self.show_balanced)
-        await statistics_updater.update_all(data)
+    def _schedule_first_sync(self) -> None:
+        if self._statistics_task is not None and not self._statistics_task.done():
+            self.log("Initial statistics synchronisation still running")
+            return
+        self._statistics_task = self.hass.async_create_task(self._first_sync())
 
-    async def _update(self) -> TauronAmiplusRawData:
-        return await self.connector.get_raw_data(include_statistics=False)
+    async def _first_sync(self) -> None:
+        try:
+            await self.generate_statistics()
+        finally:
+            self._history_ready = True
+        await self.async_request_refresh()
+
+    async def generate_statistics(self) -> None:
+        """Download only hours missing in the Recorder (everything the API returns is stored there)."""
+        try:
+            zones = await self._statistics.update_all()
+            if zones:
+                self._zones_name = zones
+        except Exception:
+            _LOGGER.exception("[%s]: Failed to update statistics", self.meter_id)
+        try:
+            await self._statistics.update_recorder_series()
+        except Exception:
+            _LOGGER.exception("[%s]: Failed to update hourly recorder series", self.meter_id)
+        self.log("Updated missing statistics")
+
+    async def _fill_from_recorder(self, data: TauronAmiplusRawData) -> None:
+        await get_instance(self.hass).async_block_till_done()
+        for generation, dataset in ((False, data.consumption), (True, data.generation)):
+            if generation and not (self.show_generation or self.show_balanced):
+                continue
+            try:
+                values = await self._statistics.read_period_values(generation, self._zones_name, data.tariff)
+            except Exception:
+                _LOGGER.exception("[%s]: Failed to read values from the Recorder", self.meter_id)
+                continue
+            if values is not None:
+                dataset.json_daily, dataset.daily_date, dataset.json_monthly, dataset.json_yearly = values
 
     def log(self, msg):
         _LOGGER.debug(f"[{self.meter_id}]: {msg}")

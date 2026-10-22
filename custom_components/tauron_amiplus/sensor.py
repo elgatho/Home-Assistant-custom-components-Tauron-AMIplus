@@ -5,8 +5,6 @@ import datetime
 import logging
 from pathlib import Path
 
-from homeassistant.helpers.storage import Store
-
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorDeviceClass, SensorEntity, SensorStateClass
@@ -266,7 +264,6 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
         self._state = None
         self._available = False
         self._accuracy = "requires_sync"
-        self._storage = Store(coordinator.hass, 1, f"tauron_amiplus_energy_storage_{meter_id}")
         self._storage_state = None
         self._last_period = None
         self._statistics_state = None
@@ -310,8 +307,8 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
             "initial_balance_entity": None,
             "accuracy": getattr(self, "_accuracy", "requires_sync"),
             "model": "last_12_months_monthly_fifo_approximation",
-            "period": getattr(self, "_storage_state", {}).get("period"),
-            "uncovered_consumption": getattr(self, "_storage_state", {}).get("uncovered_consumption"),
+            "period": (self._storage_state or {}).get("period"),
+            "uncovered_consumption": (self._storage_state or {}).get("uncovered_consumption"),
             "window": f"from_{self.coordinator.energy_storage_reset_date.isoformat()}" if self.coordinator.energy_storage_reset_date else "last_12_months",
             "reset_date": self.coordinator.energy_storage_reset_date.isoformat() if self.coordinator.energy_storage_reset_date else None,
             "tariff": self.coordinator.data.tariff if self.coordinator.data is not None else None,
@@ -320,7 +317,6 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
-        self._storage_state = await self._storage.async_load()
         await self._async_update_storage()
 
     def _handle_coordinator_update(self):
@@ -368,7 +364,6 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
             state["settlement_factor"] = self.coordinator.settlement_factor
             state["official_tauron_balance"] = False
             self._storage_state = state
-            self.hass.async_create_task(self._storage.async_save(state))
             self._state = storage_value
             self._available = True
             self._accuracy = accuracy
@@ -497,8 +492,8 @@ class TauronAmiplusSensor(SensorEntity, CoordinatorEntity):
             }
             self.async_write_ha_state()
             return
-        sum_consumption = sum(float(item["sum"]) for item in consumption_data)
-        sum_generation = sum(float(item["sum"]) for item in generation_data)
+        sum_consumption = sum(float(item["EC"]) for item in consumption_data)
+        sum_generation = sum(float(item["EC"]) for item in generation_data)
         self._state = round(sum_consumption - sum_generation, 3)
         self._params = {
             "sum_consumption": round(sum_consumption, 3),

@@ -10,7 +10,6 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
-from .history_import import async_import_raw_once
 from .statistics import TauronAmiplusStatisticsUpdater
 from .typing_helpers import TauronAmiplusConfigEntry
 
@@ -45,34 +44,6 @@ class DownloadStatisticsService:
         await TauronAmiplusStatisticsUpdater.manually_update(self._hass, start_date, config_entry)
 
 
-class ImportHistoryService:
-    domain = DOMAIN
-    service = "import_history"
-    schema = vol.Schema({
-        vol.Required("device_id"): cv.string,
-        vol.Optional("force", default=False): cv.boolean,
-    })
-
-    def __init__(self, hass: HomeAssistant):
-        self._hass = hass
-
-    async def async_handle_service(self, call: ServiceCall) -> None:
-        device = dr.async_get(self._hass).async_get(call.data["device_id"])
-        if device is None or not device.config_entries:
-            _LOGGER.error("Tauron history import failed: device not found: %s", call.data["device_id"])
-            return
-        entry = self._hass.config_entries.async_get_entry(next(iter(device.config_entries)))
-        if entry is None:
-            _LOGGER.error("Tauron history import failed: config entry not found")
-            return
-        await async_import_raw_once(
-            self._hass,
-            entry.data["energy_meter_id"],
-            self._hass.config.path("tauron_raw_data.json"),
-            force=call.data["force"],
-        )
-
-
 class ClearCacheService:
 
     domain = DOMAIN
@@ -93,6 +64,6 @@ class ClearCacheService:
 
 
 def register_all_services(hass: HomeAssistant) -> None:
-    services = [DownloadStatisticsService(hass), ImportHistoryService(hass), ClearCacheService(hass)]
+    services = [DownloadStatisticsService(hass), ClearCacheService(hass)]
     for service in services:
         hass.services.async_register(service.domain, service.service, service.async_handle_service, service.schema)

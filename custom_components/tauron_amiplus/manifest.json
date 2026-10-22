@@ -1,6 +1,6 @@
 {
   "domain": "tauron_amiplus",
-  "name": "Tauron AMIplus",
+  "name": "Tauron Amiplus+",
   "codeowners": ["@PiotrMachowski ElgathoFork"],
   "config_flow": true,
   "dependencies": ["recorder"],

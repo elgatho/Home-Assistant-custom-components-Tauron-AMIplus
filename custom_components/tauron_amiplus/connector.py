@@ -155,6 +155,24 @@ class TauronAmiplusConnector:
         self._cache.delete_older_than(min(consumption_max_cache, generation_max_cache))
         return data
 
+    async def get_light_data(self) -> TauronAmiplusRawData:
+        """Only what the Recorder cannot provide: tariff and meter readings (daily/monthly/yearly values and
+        hourly series are built from the Recorder, see TauronAmiplusStatisticsUpdater)."""
+        data = TauronAmiplusRawData()
+        data.tariff = await self.login()
+        data.consumption = TauronAmiplusDataSet()
+        data.consumption.json_reading = await self.get_reading(False)
+        data.generation = TauronAmiplusDataSet()
+        if self._show_generation or self._show_balanced:
+            data.generation.json_reading = await self.get_reading(True)
+        self._cache.delete_older_than(datetime.datetime.now() - datetime.timedelta(days=8))
+        return data
+
+    async def get_zones_name(self) -> dict:
+        """Zones of the current tariff, taken from the latest available day (usually one request)."""
+        values, _ = await self.get_values_daily(False)
+        return dict(values["data"].get("zonesName", {})) if values else {}
+
     async def get_data_set(self, generation, include_statistics: bool = True) -> Tuple[TauronAmiplusDataSet, datetime.datetime]:
         dataset = TauronAmiplusDataSet()
         dataset.json_reading = await self.get_reading(generation)
@@ -497,9 +515,6 @@ class TauronAmiplusConnector:
             measurement_type = "oze" if generation else "consum"
             parsed = parse_daily_endpoint(measurement_type, day.date() if hasattr(day, "date") else day, {"data": values.get("data", {})}, logger=_LOGGER)
             if parsed is not None:
-                for reading in parsed.readings:
-                    if reading.timestamp not in [item.timestamp for item in self.hourly_series[measurement_type]]:
-                        self.hourly_series[measurement_type].append(reading)
                 self.hourly_diagnostics[str(day.date() if hasattr(day, "date") else day)] = parsed.diagnostics
             values["data"]["allData"] = [
                 d for d in values["data"]["allData"] if self.contains_data(d)
@@ -508,6 +523,25 @@ class TauronAmiplusConnector:
             return values
         self.log(f"Failed to download daily data for day: {day_str}, generation: {generation}")
         return None
+
+    async def get_hourly_readings(self, measurement_type: str, first_day: datetime.date, last_day: datetime.date):
+        """Download hourly readings of one series (consum, oze, netto, netto_oze), one request per day."""
+        readings = []
+        day = first_day
+        while day <= last_day:
+            payload = {
+                "from": TauronAmiplusConnector.format_date(day),
+                "to": TauronAmiplusConnector.format_date(day),
+                "profile": "full time",
+                "type": measurement_type,
+            }
+            values = await self.get_chart_values(payload)
+            if values is not None:
+                parsed = parse_daily_endpoint(measurement_type, day, {"data": values.get("data", {})}, logger=_LOGGER)
+                if parsed is not None:
+                    readings.extend(parsed.readings)
+            day += datetime.timedelta(days=1)
+        return readings
 
     async def get_reading(self, generation):
         date_to = datetime.datetime.now()

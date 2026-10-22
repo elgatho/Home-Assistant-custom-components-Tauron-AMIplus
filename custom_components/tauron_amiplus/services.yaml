@@ -17,23 +17,6 @@ download_statistics:
       selector:
         date:
 
-import_history:
-  description: Import Tauron historical data into Home Assistant Recorder.
-  fields:
-    device_id:
-      name: Target device
-      required: true
-      selector:
-        device:
-          filter:
-            - integration: tauron_amiplus
-    force:
-      name: Force reimport
-      required: false
-      default: false
-      selector:
-        boolean:
-
 clear_cache:
   description: >
     Clear cache for a given meter.

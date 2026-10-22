@@ -7,7 +7,7 @@ from homeassistant.const import Platform
 PLATFORMS = [Platform.SENSOR]
 DOMAIN = "tauron_amiplus"
 STATISTICS_DOMAIN = "tauron_importer"
-DEFAULT_NAME = "Tauron AMIplus"
+DEFAULT_NAME = "Tauron Amiplus+"
 DATA_TAURON_CLIENT = "data_client"
 CONF_METER_ID = "energy_meter_id"
 CONF_METER_NAME = "energy_meter_name"

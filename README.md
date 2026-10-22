@@ -22,7 +22,7 @@
 [installations_shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fanalytics.home-assistant.io%2Fcustom_integrations.json&query=%24.tauron_amiplus.total&style=popout&color=41bdf5&label=analytics
 
 
-# Tauron AMIplus sensor
+# Tauron Amiplus+
 
 This integration retrieves energy consumption and generation data from the unofficial [TAURON eLicznik](https://elicznik.tauron-dystrybucja.pl) API.
 
@@ -42,9 +42,33 @@ Statistics are handled separately from the current-value sensors:
 
 - Home Assistant Recorder is the primary source for already stored long-term statistics.
 - The integration queries the TAURON API only for the missing or recent range needed to extend the statistics.
-- Current readings and summary values are still obtained from the TAURON API because they are live values, not Recorder history.
+- Daily, monthly and yearly values (with per-zone split) are calculated from Recorder statistics. Every refresh the TAURON API is asked only for the tariff, the meter readings (the counter state, which cannot be derived from history) and the hours that are not yet in the Recorder.
 - Recorder statistics are exposed under the `tauron_importer` source and can be used by the Home Assistant Energy dashboard.
-- The first synchronization after a fresh installation can take longer because the missing history has to be downloaded. Later synchronizations should be incremental.
+- On the first run (no statistics stored for the meter yet) the integration downloads the history automatically: **12 months, from the 1st day of the month 12 months back up to today** (e.g. on 22.10.2026 from 01.10.2025). This needs one request per day and series, so it takes several minutes; it runs in the background and the sensors are not blocked. If it is interrupted it continues from the last stored hour. Later synchronizations only add the missing hours.
+- Besides the `tauron_importer` statistics, the integration keeps four raw hourly series up to date in the Recorder (`tauron_amiplus:<meter>_consum`, `_oze`, `_netto`, `_netto_oze`). They are the data source of the energy storage and the rolling 12-month sensors. They are filled by the same automatic mechanism; the former import from `tauron_raw_data.json` and the `tauron_amiplus.import_history` service were removed.
+- The Recorder is the only store of historical data. The integration keeps no history of its own (no files, no `.storage` copies of readings or of the energy storage result); it asks the TAURON API only for hours that are not in the Recorder yet, and the energy storage and 12-month sensors are recalculated from Recorder statistics.
+- To download a longer period or refill a gap use the `tauron_amiplus.download_statistics` service with a start date.
+
+## Tariff detection and multi-zone tariffs (G11, G12, G12W)
+
+The tariff is read from eLicznik on every refresh, so no configuration is needed when it changes (e.g. G11 -> G12W).
+
+- The detected tariff is shown as the device software version (`Tariff G12W`), in the attributes of the energy storage sensor and in the log (`Tariff changed from ... to ...`).
+- Hourly data keeps the zone of every hour. If the tariff changes inside the fetched range, zones of the previous tariff are stored separately (e.g. `G11_1` = `Cała doba (T1) [G11]`), so the whole-day G11 zone is never mixed with the peak zone of G12W.
+- Monthly and yearly zone totals are rebuilt from the per-day rows returned by eLicznik for the same reason (the API itself sums zone numbers across tariffs).
+- Hourly statistics get per-zone variants (`..._consumption_zone_1`, `..._consumption_zone_2`) for multi-zone tariffs. Hours recorded under another tariff count as `0` in those per-zone statistics; the total statistic always contains everything.
+- The energy storage ("magazyn") does not depend on the tariff: it always sums total energy.
+
+### Zone sensors (multi-zone tariffs only)
+
+Created automatically as soon as the detected tariff has more than one zone; not created for G11:
+
+| Sensor | Description |
+|---|---|
+| `monthly energy consumption zone <n>` | Consumption in the current month in zone `<n>` of the current tariff (kWh). The zone name is in the `zone` attribute. Only days of the current tariff are counted. |
+| `monthly off-peak consumption share` | Share (%) of the current-tariff consumption in the cheaper zone (the zone with the highest number, e.g. `T2` in G12W). Attributes: `cheaper_zone`, `total_in_tariff`. |
+
+These sensors reset every month and are meant for cards and automations. For the Energy dashboard use the hourly `tauron_importer` statistics instead (add either the total `..._consumption`, or the per-zone ones, but not both).
 
 ## Configuration
 
@@ -52,7 +76,7 @@ The integration can be configured through the Home Assistant UI or, for legacy i
 
 ### Config flow (recommended)
 
-To configure this integration go to: _Settings_ -> _Devices & services_ -> _Add integration_ -> _Tauron AMIplus_.
+To configure this integration go to: _Settings_ -> _Devices & services_ -> _Add integration_ -> _Tauron Amiplus+_.
 
 The setup consists of:
 
@@ -88,7 +112,7 @@ You can also use following [My Home Assistant](http://my.home-assistant.io/) lin
 
 | Key                   | Type     | Required | Default          | Description                                                                    |
 |-----------------------|----------|----------|------------------|--------------------------------------------------------------------------------|
-| `name`                | `string` | `False`  | `Tauron AMIPlus` | Name of sensor                                                                 |
+| `name`                | `string` | `False`  | `Tauron Amiplus+` | Name of sensor                                                                 |
 | `username`            | `string` | `True`   | -                | Username used to login at [*eLicznik*](https://elicznik.tauron-dystrybucja.pl) |
 | `password`            | `string` | `True`   | -                | Password used to login at [*eLicznik*](https://elicznik.tauron-dystrybucja.pl) |
 | `energy_meter_id`     | `string` | `True`   | -                | ID of energy meter                                                             |
@@ -121,7 +145,7 @@ You can also use following [My Home Assistant](http://my.home-assistant.io/) lin
 ```
 sensor:
   - platform: tauron_amiplus
-    name: Tauron AMIPlus
+    name: Tauron Amiplus+
     username: !secret tauron_amiplus.username
     password: !secret tauron_amiplus.password
     energy_meter_id: !secret tauron_amiplus.energy_meter_id
@@ -169,7 +193,7 @@ The virtual energy storage sensor estimates available stored energy using genera
 
 ### Recorder statistics
 
-When **Store statistics** is enabled, hourly statistics are written to the `tauron_importer` source. The integration checks the latest stored Recorder point and requests only the recent or missing range from TAURON. The Home Assistant Energy dashboard should use the `tauron_importer` statistics rather than entity state sensors for hourly charts.
+Hourly statistics (always on, the **Store statistics** option no longer switches them off since the sensors are built from them) are written to the `tauron_importer` source. The integration checks the latest stored Recorder point and requests only the recent or missing range from TAURON. The Home Assistant Energy dashboard should use the `tauron_importer` statistics rather than entity state sensors for hourly charts.
 
 ## Installation
 
@@ -182,7 +206,7 @@ When **Store statistics** is enabled, hourly statistics are written to the `taur
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=PiotrMachowski&repository=Home-Assistant-custom-components-Tauron-AMIplus&category=integration)
 
-* In _Integrations_ section add repository "Tauron AMIplus"
+* In _Integrations_ section add repository "Tauron Amiplus+" (this fork)
 * Install added repository
  
 ### Manual
@@ -203,6 +227,7 @@ Then restart Home Assistant before applying configuration file changes.
 * **How to display hourly data in Energy dashboard?**
 
   To show hourly data in Energy dashboard you have to use `tauron_importer` statistics instead of entities.
+  With a multi-zone tariff (G12, G12W) add either the total `..._consumption` statistic, or `..._consumption_zone_1` and `..._consumption_zone_2` separately (e.g. with different prices). Do not add both, the energy would be counted twice.
 
 * **Why there are missing days in statistics/Energy dashboard?**
 

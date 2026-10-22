@@ -9,12 +9,22 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.util.dt import as_utc, get_time_zone, utc_from_timestamp
 
+from .history_import import build_metadata, statistic_id
 from .connector import TauronAmiplusConnector, TauronAmiplusRawData
 from .const import (CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_BALANCED, CONF_SHOW_GENERATION, CONST_BALANCED,
                     CONST_CONSUMPTION, CONST_GENERATION, DEFAULT_NAME, STATISTICS_DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
-MAX_AUTOMATIC_STATISTICS_DAYS = 7
+MAX_AUTOMATIC_STATISTICS_DAYS = 31
+RECORDER_SERIES = ("netto", "netto_oze")
+PREVIOUS_TARIFF_ZONE = "prev_tariff"
+HISTORY_MONTHS = 12
+
+
+def history_start_day(today: datetime.date | None = None) -> datetime.date:
+    """First day of the month HISTORY_MONTHS months before the current one (history imported on first run)."""
+    today = today or datetime.date.today()
+    return datetime.date(today.year - HISTORY_MONTHS // 12, today.month, 1)
 
 
 class TauronAmiplusStatisticsUpdater:
@@ -42,42 +52,45 @@ class TauronAmiplusStatisticsUpdater:
                                            show_balanced=show_balanced)
         statistics_updater = TauronAmiplusStatisticsUpdater(hass, connector, meter_id, meter_name, show_generation, show_balanced)
 
-        data = await connector.get_raw_data()
         start_date = datetime.datetime.combine(start_date,
                                                datetime.time(tzinfo=datetime.datetime.now().astimezone().tzinfo))
-        if data is not None:
-            await statistics_updater.update_all(data, start_date)
+        await statistics_updater.update_all(start_date)
 
-    async def update_all(self, last_data: TauronAmiplusRawData, start_date: datetime.datetime = None) -> None:
+    async def update_all(self, start_date: datetime.datetime = None) -> dict:
+        """Download missing hours from the API into the Recorder; returns the zones of the current tariff."""
         now = datetime.datetime.now(datetime.timezone.utc)
-        zones = self._zones_from_data(last_data)
-        all_stat_ids = await self.prepare_stats_ids(zones)
+        base_ids = await self.prepare_stats_ids({})
 
         if (start_date is not None
-                or not all(self.are_stats_up_to_date(v["last_stats_end"]) for v in all_stat_ids.values())):
+                or not all(self.are_stats_up_to_date(v["last_stats_end"]) for v in base_ids.values())):
             if start_date is None:
-                stored_ends = [v["last_stats_end"] for v in all_stat_ids.values() if v["last_stats_end"] is not None]
-                start_range = max(
-                    min(stored_ends, default=now - datetime.timedelta(days=MAX_AUTOMATIC_STATISTICS_DAYS)),
-                    now - datetime.timedelta(days=MAX_AUTOMATIC_STATISTICS_DAYS),
-                )
-                start_range = start_range.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+                stored_ends = [v["last_stats_end"] for v in base_ids.values() if v["last_stats_end"] is not None]
+                if stored_ends:
+                    start_range = max(min(stored_ends), now - datetime.timedelta(days=MAX_AUTOMATIC_STATISTICS_DAYS))
+                    start_range = start_range.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+                else:
+                    # First run: download the whole history (see history_start_day)
+                    start_range = datetime.datetime.combine(
+                        history_start_day(), datetime.time(), tzinfo=datetime.datetime.now().astimezone().tzinfo)
             else:
                 start_range = start_date
             data_consumption = await self.connector.get_raw_values_daily_for_range(start_range, now, False)
             raw_data = {CONST_CONSUMPTION: data_consumption["data"]["allData"] if data_consumption else []}
-            if data_consumption:
-                zones = data_consumption["data"].get("zonesName", zones)
             if self.show_generation or self.show_balanced:
                 data_generation = await self.connector.get_raw_values_daily_for_range(start_range, now, True)
                 if not data_generation:
-                    return
+                    return {}
                 raw_data[CONST_GENERATION] = data_generation["data"]["allData"]
         else:
-            return
+            return {}
+
+        zones = {}
+        if data_consumption:
+            zones = {k: v for k, v in data_consumption["data"].get("zonesName", {}).items() if "_" not in str(k)}
+        all_stat_ids = await self.prepare_stats_ids(zones)
 
         if not raw_data[CONST_CONSUMPTION]:
-            return
+            return zones
 
         if self.show_balanced:
             balanced_consumption, balanced_generation = self.prepare_balanced_raw_data(raw_data)
@@ -103,12 +116,7 @@ class TauronAmiplusStatisticsUpdater:
 
         for s, v in all_stat_ids.items():
             await self.update_stats(s, v["name"], v["sum"], v["last_stats_time"], v["zone"], raw_data[v["data_source"]])
-
-    @staticmethod
-    def _zones_from_data(data: TauronAmiplusRawData) -> dict:
-        if data.consumption is None or not data.consumption.json_daily:
-            return {}
-        return data.consumption.json_daily.get("data", {}).get("zonesName", {})
+        return zones
 
     async def prepare_stats_ids(self, zones):
         suffixes = [{
@@ -175,7 +183,7 @@ class TauronAmiplusStatisticsUpdater:
         if last_stats_end is None:
             return False
         now = datetime.datetime.now()
-        return (as_utc(now) - last_stats_end).days < 30
+        return (as_utc(now) - last_stats_end) < datetime.timedelta(hours=1)
 
     @staticmethod
     def prepare_balanced_raw_data(raw_data) -> (dict, dict):
@@ -220,6 +228,102 @@ class TauronAmiplusStatisticsUpdater:
             balanced_generation.append(output_generation)
 
         return balanced_consumption, balanced_generation
+
+    async def update_recorder_series(self) -> None:
+        """Keep the raw hourly series (`tauron_amiplus:<meter>_<type>`) up to date in the Recorder.
+
+        They are read by the energy storage and rolling 12-month sensors. On the first run the last
+        HISTORY_MONTHS months are downloaded; later runs only add hours after the last stored one.
+        """
+        today = datetime.date.today()
+        for measurement_type in RECORDER_SERIES:
+            stat_id = statistic_id(self.meter_id, measurement_type)
+            last = await self.get_last_stats(stat_id)
+            total = 0.0
+            last_start = None
+            first_day = history_start_day(today)
+            if last.get(stat_id):
+                row = last[stat_id][0]
+                total = float(row.get("sum") or 0)
+                last_start = row.get("start")
+                if isinstance(last_start, (int, float)):
+                    last_start = utc_from_timestamp(last_start)
+                if last_start is not None:
+                    first_day = max(first_day, last_start.astimezone(get_time_zone("Europe/Warsaw")).date())
+            readings = await self.connector.get_hourly_readings(measurement_type, first_day, today)
+            statistic_data = []
+            for reading in sorted(readings, key=lambda item: item.timestamp):
+                start = as_utc(reading.timestamp)
+                if last_start is not None and start <= last_start:
+                    continue
+                total += float(reading.value)
+                statistic_data.append({"start": start, "state": float(reading.value), "sum": total})
+            if statistic_data:
+                metadata = build_metadata(f"{DEFAULT_NAME} {self.meter_name} {measurement_type}", stat_id)
+                async_add_external_statistics(self.hass, metadata, statistic_data)
+            self.log(f"Updated {len(statistic_data)} entries for statistic: {stat_id}")
+
+    async def read_period_values(self, generation: bool, zones_name: dict, tariff: str | None):
+        """Build daily/monthly/yearly values of the current tariff from hourly statistics stored in the Recorder.
+
+        Returns (daily, daily_date, monthly, yearly) in the shape used by the sensors, or None without data.
+        """
+        base = CONST_GENERATION if generation else CONST_CONSUMPTION
+        zone_ids = [z for z in zones_name if "_" not in str(z)]
+        ids = {None: self.get_stats_id(base)}
+        if len(zone_ids) > 1:
+            ids.update({z: self.get_stats_id(f"{base}_zone_{z}") for z in zone_ids})
+        tz = get_time_zone("Europe/Warsaw")
+        today = datetime.datetime.now(tz).date()
+        year_start = datetime.datetime(today.year, 1, 1, tzinfo=tz)
+        result = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass, year_start, None, set(ids.values()), "hour", None, {"state"})
+
+        by_day = {}
+        for key, stat_id in ids.items():
+            days = by_day.setdefault(key, {})
+            for row in result.get(stat_id, []):
+                start, state = row.get("start"), row.get("state")
+                if start is None or state is None:
+                    continue
+                if isinstance(start, (int, float)):
+                    start = utc_from_timestamp(start)
+                day = start.astimezone(tz).date()
+                days[day] = days.get(day, 0.0) + float(state)
+        if not by_day[None]:
+            return None
+
+        last_day = max(by_day[None])
+        names = {z: zones_name[z] for z in zone_ids}
+
+        def period(first: datetime.date, last: datetime.date):
+            days = sorted(d for d in by_day[None] if first <= d <= last)
+            if not days:
+                return None
+            total = sum(by_day[None][d] for d in days)
+            if len(zone_ids) > 1:
+                zones = {z: sum(v for d, v in by_day[z].items() if first <= d <= last) for z in zone_ids}
+                rest = total - sum(zones.values())
+                if rest > 0.001:
+                    zones[PREVIOUS_TARIFF_ZONE] = rest
+                    names[PREVIOUS_TARIFF_ZONE] = "Previous tariff"
+            else:
+                zones = {z: total for z in zone_ids}
+            return {"data": {
+                "sum": total,
+                "zones": zones,
+                "zonesName": dict(names),
+                "tariff": tariff,
+                "allData": [{"Date": days[0].isoformat()}, {"Date": days[-1].isoformat()}],
+            }}
+
+        return (
+            period(last_day, last_day),
+            TauronAmiplusConnector.format_date(last_day),
+            period(today.replace(day=1), today),
+            period(today.replace(month=1, day=1), today),
+        )
 
     async def update_stats(self, statistic_id, statistic_name, initial_sum, last_stats_time, zone_id, raw_data):
         current_sum = initial_sum

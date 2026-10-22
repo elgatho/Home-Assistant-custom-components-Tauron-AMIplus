@@ -1,5 +1,4 @@
 """Support for Tauron sensors."""
-import asyncio
 import datetime
 import logging
 
@@ -17,7 +16,6 @@ from .const import (
     DOMAIN, PLATFORMS,
 )
 from .coordinator import TauronAmiplusUpdateCoordinator
-from .history_import import async_import_raw_once
 from .services import register_all_services
 from .typing_helpers import TauronAmiplusRuntimeData, TauronAmiplusConfigEntry
 
@@ -75,14 +73,6 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: TauronAmiplusConf
         show_configurable_date = parse_date(show_configurable_date)
     else:
         show_configurable = False
-
-    async def delayed_history_import() -> None:
-        _LOGGER.info("Scheduling Tauron historical import after startup delay")
-        await asyncio.sleep(30)
-        await hass.async_block_till_done()
-        await async_import_raw_once(hass, meter_id, hass.config.path("tauron_raw_data.json"))
-
-    hass.async_create_task(delayed_history_import())
 
     tauron_amiplus_update_coordinator = TauronAmiplusUpdateCoordinator(
         hass,
