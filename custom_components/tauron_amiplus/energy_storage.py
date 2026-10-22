@@ -186,7 +186,7 @@ def calculate_monthly_window(
         raise ValueError("settlement_factor must be between 0 and 1")
 
     current_month = month_after(today.year, today.month, 1)
-    # A fixed window_start pins the first accounted month (e.g. 2025-09-01) and
+    # A fixed window_start pins the first accounted month (energy_storage_reset_date) and
     # excludes everything before it; without it, fall back to a rolling window.
     if window_start is not None:
         first_month = date(window_start.year, window_start.month, 1)

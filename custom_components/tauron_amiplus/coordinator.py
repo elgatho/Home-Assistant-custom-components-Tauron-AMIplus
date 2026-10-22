@@ -3,6 +3,7 @@ import datetime
 import logging
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .connector import TauronAmiplusConnector, TauronAmiplusRawData
@@ -47,16 +48,31 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
         self.store_statistics = store_statistics
         self.settlement_factor = max(0.0, min(1.0, float(settlement_factor)))
         self.energy_storage_reset_date = energy_storage_reset_date
+        self._last_tariff = None
 
     async def update_method(self) -> TauronAmiplusRawData:
         self.log("Starting data update")
         data = await self._update()
+        self._sync_device_tariff(data)
         self.log("Downloaded current data; Recorder remains the statistics source")
         if data is not None and self.store_statistics:
             self.log("Starting incremental statistics update")
             await self.generate_statistics(data)
             self.log("Updated missing statistics")
         return data
+
+    def _sync_device_tariff(self, data) -> None:
+        """Keep the device's displayed tariff in line with the tariff detected in the latest data."""
+        tariff = getattr(data, "tariff", None)
+        if not tariff or tariff == "unknown" or tariff == self._last_tariff:
+            return
+        if self._last_tariff is not None:
+            _LOGGER.info("[%s]: Tariff changed from %s to %s", self.meter_id, self._last_tariff, tariff)
+        self._last_tariff = tariff
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device(identifiers={(DOMAIN, self.meter_id)})
+        if device is not None:
+            registry.async_update_device(device.id, sw_version=f"Tariff {tariff}")
 
     async def generate_statistics(self, data):
         statistics_updater = TauronAmiplusStatisticsUpdater(self.hass, self.connector, self.meter_id, self.meter_name,

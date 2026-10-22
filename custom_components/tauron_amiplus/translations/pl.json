@@ -30,7 +30,9 @@
           "show_12_months_sensors": "Obliczanie podsumowań dla okresu 12 miesięcy",
           "show_configurable_sensors": "Obliczanie podsumowań dla okresu o konfigurowalnym początku",
           "show_configurable_sensors_date": "Początek okresu dla konfigurowalnych podsumowań",
-          "store_statistics": "Zapisywanie godzinowe statystyki (dla panelu Energia)"
+          "store_statistics": "Zapisywanie godzinowe statystyki (dla panelu Energia)",
+          "settlement_factor": "Współczynnik rozliczenia magazynu wirtualnego (opust, np. 0.8)",
+          "energy_storage_reset_date": "Data startu magazynu wirtualnego (saldo od 0 kWh, wcześniejsze dane są pomijane; puste = ostatnie 12 miesięcy)"
         }
       },
       "reauth_confirm": {
@@ -55,7 +57,9 @@
           "show_12_months_sensors": "Obliczanie podsumowań dla okresu 12 miesięcy",
           "show_configurable_sensors": "Obliczanie podsumowań dla okresu o konfigurowalnym początku",
           "show_configurable_sensors_date": "Początek okresu dla konfigurowalnych podsumowań",
-          "store_statistics": "Zapisywanie godzinowe statystyki (dla panelu Energia)"
+          "store_statistics": "Zapisywanie godzinowe statystyki (dla panelu Energia)",
+          "settlement_factor": "Współczynnik rozliczenia magazynu wirtualnego (opust, np. 0.8)",
+          "energy_storage_reset_date": "Data startu magazynu wirtualnego (saldo od 0 kWh, wcześniejsze dane są pomijane; puste = ostatnie 12 miesięcy)"
         }
       }
     },

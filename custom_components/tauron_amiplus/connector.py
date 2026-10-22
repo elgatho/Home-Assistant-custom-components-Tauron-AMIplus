@@ -401,19 +401,33 @@ class TauronAmiplusConnector:
             "zones": {},
             "zonesName": {}
         }}
+        days_data = []
         for day in [day_from + datetime.timedelta(days=x) for x in range((day_to - day_from).days + 1)]:
             day_data = await self.get_raw_values_daily_for_day(day, generation)
             if day_data is not None:
-                data["data"]["allData"].extend(day_data["data"]["allData"])
-                data["data"]["sum"] += day_data["data"]["sum"]
-                data["data"]["zonesName"] = {**(day_data["data"]["zonesName"]), **(data["data"]["zonesName"])}
-                if "tariff" in day_data["data"]:
-                    data["data"]["tariff"] = day_data["data"]["tariff"]
-                for z, v in day_data["data"]["zones"].items():
-                    if z in data["data"]["zones"]:
-                        data["data"]["zones"][z] += v
-                    else:
-                        data["data"]["zones"][z] = v
+                days_data.append(day_data)
+
+        # The most recent day defines the current tariff; days from other tariffs keep their zones separate.
+        current_tariff = next((d["data"]["tariff"] for d in reversed(days_data) if d["data"].get("tariff")), None)
+        for day_data in days_data:
+            day_info = day_data["data"]
+            items = day_info["allData"]
+            zones_name = day_info["zonesName"]
+            zones = day_info["zones"]
+            day_tariff = day_info.get("tariff")
+            if current_tariff and day_tariff and day_tariff != current_tariff:
+                prefix = f"{day_tariff}_"
+                suffix = f" [{day_tariff}]"
+                items = [{**item, "Zone": prefix + str(item["Zone"])} for item in items]
+                zones_name = {prefix + str(k): v + suffix for k, v in zones_name.items()}
+                zones = {prefix + str(k): v for k, v in zones.items()}
+            data["data"]["allData"].extend(items)
+            data["data"]["sum"] += day_info["sum"]
+            data["data"]["zonesName"] = {**data["data"]["zonesName"], **zones_name}
+            if day_tariff:
+                data["data"]["tariff"] = day_tariff
+            for z, v in zones.items():
+                data["data"]["zones"][z] = data["data"]["zones"].get(z, 0) + v
 
         if len(data["data"]["allData"]) == 0:
             return None

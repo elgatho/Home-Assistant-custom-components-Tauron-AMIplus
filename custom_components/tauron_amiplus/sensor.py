@@ -150,7 +150,6 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
         self._last_period = None
         self._statistics_state = None
         self._statistics_loaded = False
-        self._raw_tariff = "G11"
         self._raw_path = None
 
     @property
@@ -194,7 +193,7 @@ class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
             "uncovered_consumption": getattr(self, "_storage_state", {}).get("uncovered_consumption"),
             "window": f"from_{self.coordinator.energy_storage_reset_date.isoformat()}" if self.coordinator.energy_storage_reset_date else "last_12_months",
             "reset_date": self.coordinator.energy_storage_reset_date.isoformat() if self.coordinator.energy_storage_reset_date else None,
-            "tariff": self._raw_tariff,
+            "tariff": self.coordinator.data.tariff if self.coordinator.data is not None else None,
             "raw_source": "Home Assistant Recorder",
         }
 
@@ -479,6 +478,11 @@ class TauronAmiplusConfigFlowSensor(TauronAmiplusSensor):
         self._tariff = tariff
         self._meter_name = meter_name
 
+    def _current_tariff(self):
+        data = self.coordinator.data
+        detected = getattr(data, "tariff", None)
+        return detected if detected and detected != "unknown" else self._tariff
+
     @property
     def device_info(self):
         return {
@@ -486,7 +490,7 @@ class TauronAmiplusConfigFlowSensor(TauronAmiplusSensor):
             "name": f"{DEFAULT_NAME} {self._meter_name}",
             "manufacturer": "TAURON",
             "model": self._meter_id,
-             "sw_version": f"Tariff {self._tariff}",
+             "sw_version": f"Tariff {self._current_tariff()}",
              "configuration_url": CONST_URL_SERVICE,
         }
 
@@ -511,7 +515,7 @@ class TauronAmiplusRecorderLast12MonthsSensor(SensorEntity, CoordinatorEntity):
         self._meter_id = meter_id
         self._sensor_type = sensor_type
         # consum/oze = raw grid import/export (same series as daily/monthly/yearly sensors);
-        # balance = hourly-balanced netto - netto_oze (same as get_balanced_data).
+        # balance = hourly-balanced netto_oze - netto.
         if sensor_type.startswith(CONST_BALANCED):
             self._measurement_types = ("netto", "netto_oze")
         elif sensor_type.startswith(CONST_GENERATION):
@@ -582,10 +586,13 @@ class TauronAmiplusRecorderLast12MonthsSensor(SensorEntity, CoordinatorEntity):
                 self._state = None
                 self._available = False
             else:
-                self._state = round(sums[0] - sum(sums[1:]), 3)
                 self._params = {"data_range": f"{start.date()} - {end.date()}"}
                 if len(sums) == 2:
+                    # Balance = generation - consumption: negative when more energy was drawn than produced.
+                    self._state = round(sums[1] - sums[0], 3)
                     self._params |= {"sum_consumption": round(sums[0], 3), "sum_generation": round(sums[1], 3)}
+                else:
+                    self._state = round(sums[0], 3)
                 self._available = True
         except (HomeAssistantError, ValueError, TypeError, KeyError) as err:
             _LOGGER.warning(f"Failed to read recorder statistics for meter {self._meter_id}: {err}")

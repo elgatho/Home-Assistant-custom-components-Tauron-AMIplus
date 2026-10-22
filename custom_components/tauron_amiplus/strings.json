@@ -30,7 +30,9 @@
           "show_12_months_sensors": "Enable calculating energy usage/generation for 12 months period",
           "show_configurable_sensors": "Enable calculating energy usage/generation for a configurable data period",
           "show_configurable_sensors_date": "Start date for configurable data period",
-          "store_statistics": "Store hourly statistics (for Energy dashboard)"
+          "store_statistics": "Store hourly statistics (for Energy dashboard)",
+          "settlement_factor": "Settlement factor for virtual energy storage (net-metering, e.g. 0.8)",
+          "energy_storage_reset_date": "Virtual energy storage start date (balance starts at 0 kWh; earlier data is ignored; leave empty for rolling 12 months)"
         }
       },
       "reauth_confirm": {
@@ -56,7 +58,9 @@
           "show_12_months_sensors": "Enable calculating energy usage/generation for 12 months period",
           "show_configurable_sensors": "Enable calculating energy usage/generation for a configurable data period",
           "show_configurable_sensors_date": "Start date for configurable data period",
-          "store_statistics": "Store hourly statistics (for Energy dashboard)"
+          "store_statistics": "Store hourly statistics (for Energy dashboard)",
+          "settlement_factor": "Settlement factor for virtual energy storage (net-metering, e.g. 0.8)",
+          "energy_storage_reset_date": "Virtual energy storage start date (balance starts at 0 kWh; earlier data is ignored; leave empty for rolling 12 months)"
         }
       }
     },
