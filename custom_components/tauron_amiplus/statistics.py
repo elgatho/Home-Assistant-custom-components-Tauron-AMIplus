@@ -87,8 +87,13 @@ class TauronAmiplusStatisticsUpdater:
         for s, v in all_stat_ids.items():
             if v["last_stats_end"] is not None:
                 stat = await self.get_stats(raw_data[v["data_source"]], s)
+                if not stat.get(s):
+                    # No stored statistics within the fetched range: continue from the last stored one.
+                    stat = await self.get_last_stats(s)
+                if not stat.get(s):
+                    continue
                 v["sum"] = stat[s][0]["sum"]
-                start = stat[s][0]["start"]
+                start = stat[s][0].get("start", v["last_stats_end"])
                 if isinstance(start, float):
                     start = utc_from_timestamp(start)
                 if start_date is not None and start > start_date:

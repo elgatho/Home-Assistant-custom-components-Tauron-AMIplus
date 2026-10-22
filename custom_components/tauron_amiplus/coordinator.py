@@ -49,6 +49,7 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
         self.settlement_factor = max(0.0, min(1.0, float(settlement_factor)))
         self.energy_storage_reset_date = energy_storage_reset_date
         self._last_tariff = None
+        self._config_entry_id = config_entry_id
 
     async def update_method(self) -> TauronAmiplusRawData:
         self.log("Starting data update")
@@ -70,7 +71,7 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
             _LOGGER.info("[%s]: Tariff changed from %s to %s", self.meter_id, self._last_tariff, tariff)
         self._last_tariff = tariff
         registry = dr.async_get(self.hass)
-        device = next((d for d in registry.devices.values() if (DOMAIN, self.meter_id) in d.identifiers), None)
+        device = next((d for d in dr.async_entries_for_config_entry(registry, self._config_entry_id) if (DOMAIN, self.meter_id) in d.identifiers), None)
         if device is not None:
             registry.async_update_device(device.id, sw_version=f"Tariff {tariff}")
 
