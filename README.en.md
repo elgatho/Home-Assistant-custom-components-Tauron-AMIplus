@@ -7,11 +7,11 @@
 [hacs_shield]: https://img.shields.io/static/v1.svg?label=HACS&message=Default&style=popout&color=green&labelColor=41bdf5&logo=HomeAssistantCommunityStore&logoColor=white
 [hacs]: https://hacs.xyz/docs/default_repositories
 
-[latest_release]: https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/releases/latest
-[releases_shield]: https://img.shields.io/github/release/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus.svg?style=popout
+[latest_release]: https://github.com/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/releases/latest
+[releases_shield]: https://img.shields.io/github/release/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus.svg?style=popout
 
-[releases]: https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/releases
-[downloads_total_shield]: https://img.shields.io/github/downloads/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/total
+[releases]: https://github.com/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/releases
+[downloads_total_shield]: https://img.shields.io/github/downloads/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/total
 
 [installations_shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fanalytics.home-assistant.io%2Fcustom_integrations.json&query=%24.tauron_amiplus.total&style=popout&color=41bdf5&label=analytics
 
@@ -194,24 +194,22 @@ Hourly statistics (always on, the **Store statistics** option no longer switches
 ## Installation
 
 
-<table><tr><th>Since v2.3.0 this integration requires Home Assistant version 2022.12 or latter</th></tr></table>
-<table><tr><th>Since v2.4.8 this integration might cause slow starts of Home Assistant</th></tr></table>
 
 
 ### Using [HACS](https://hacs.xyz/) (recommended)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=PiotrMachowski&repository=Home-Assistant-custom-components-Tauron-AMIplus&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=elgatho&repository=Home-Assistant-custom-components-Tauron-AMIplusplus&category=integration)
 
 * In _Integrations_ section add repository "Tauron Amiplus+" (this fork)
 * Install added repository
  
 ### Manual
 
-Download [*tauron_amiplus.zip*](https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/releases/latest/download/tauron_amiplus.zip) and extract its contents to `config/custom_components/tauron_amiplus` directory:
+Download [*tauron_amiplus.zip*](https://github.com/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/releases/latest/download/tauron_amiplus.zip) and extract its contents to `config/custom_components/tauron_amiplus` directory:
 ```bash
 mkdir -p custom_components/tauron_amiplus
 cd custom_components/tauron_amiplus
-wget https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/releases/latest/download/tauron_amiplus.zip
+wget https://github.com/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/releases/latest/download/tauron_amiplus.zip
 unzip tauron_amiplus.zip
 rm tauron_amiplus.zip
 ```
@@ -240,10 +238,6 @@ Then restart Home Assistant before applying configuration file changes.
   This timer is restarted after: HA restart, integration reload, configuration change.
   Additionally, a new pack of data is freshly downloaded when user retrieves diagnostics data.
 
-* **How to get energy meter id?**
-  
-  To find out value for `energy_meter_id` follow [these steps](https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/issues/105#issuecomment-1413675239).
-  
 * **How to calculate available energy as a prosument?**
 
   To calculate available energy you can use following config:

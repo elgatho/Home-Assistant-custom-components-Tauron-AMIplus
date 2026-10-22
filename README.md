@@ -7,11 +7,11 @@
 [hacs_shield]: https://img.shields.io/static/v1.svg?label=HACS&message=Default&style=popout&color=green&labelColor=41bdf5&logo=HomeAssistantCommunityStore&logoColor=white
 [hacs]: https://hacs.xyz/docs/default_repositories
 
-[latest_release]: https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/releases/latest
-[releases_shield]: https://img.shields.io/github/release/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus.svg?style=popout
+[latest_release]: https://github.com/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/releases/latest
+[releases_shield]: https://img.shields.io/github/release/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus.svg?style=popout
 
-[releases]: https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/releases
-[downloads_total_shield]: https://img.shields.io/github/downloads/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/total
+[releases]: https://github.com/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/releases
+[downloads_total_shield]: https://img.shields.io/github/downloads/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/total
 
 [installations_shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fanalytics.home-assistant.io%2Fcustom_integrations.json&query=%24.tauron_amiplus.total&style=popout&color=41bdf5&label=analytics
 
@@ -190,23 +190,21 @@ Statystyki godzinowe (zawsze włączone; opcja **Store statistics** już ich nie
 
 ## Instalacja
 
-<table><tr><th>Od wersji v2.3.0 integracja wymaga Home Assistanta w wersji 2022.12 lub nowszej</th></tr></table>
-<table><tr><th>Od wersji v2.4.8 integracja może powodować wolniejszy start Home Assistanta</th></tr></table>
 
 ### Przez [HACS](https://hacs.xyz/) (zalecane)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=PiotrMachowski&repository=Home-Assistant-custom-components-Tauron-AMIplus&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=elgatho&repository=Home-Assistant-custom-components-Tauron-AMIplusplus&category=integration)
 
 * W sekcji _Integracje_ dodaj repozytorium „Tauron Amiplus+” (ten fork)
 * Zainstaluj dodane repozytorium
 
 ### Ręcznie
 
-Pobierz [*tauron_amiplus.zip*](https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/releases/latest/download/tauron_amiplus.zip) i rozpakuj do katalogu `config/custom_components/tauron_amiplus`:
+Pobierz [*tauron_amiplus.zip*](https://github.com/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/releases/latest/download/tauron_amiplus.zip) i rozpakuj do katalogu `config/custom_components/tauron_amiplus`:
 ```bash
 mkdir -p custom_components/tauron_amiplus
 cd custom_components/tauron_amiplus
-wget https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/releases/latest/download/tauron_amiplus.zip
+wget https://github.com/elgatho/Home-Assistant-custom-components-Tauron-AMIplusplus/releases/latest/download/tauron_amiplus.zip
 unzip tauron_amiplus.zip
 rm tauron_amiplus.zip
 ```
@@ -234,10 +232,6 @@ Następnie zrestartuj Home Assistanta przed zastosowaniem zmian w pliku konfigur
   Integracja loguje się i pobiera dane z eLicznika co 8,5 h.
   Licznik jest restartowany po: restarcie HA, przeładowaniu integracji i zmianie konfiguracji.
   Dodatkowo nowa paczka danych jest pobierana, gdy użytkownik pobiera dane diagnostyczne.
-
-* **Jak znaleźć ID licznika energii?**
-
-  Wartość `energy_meter_id` znajdziesz, postępując według [tych kroków](https://github.com/PiotrMachowski/Home-Assistant-custom-components-Tauron-AMIplus/issues/105#issuecomment-1413675239).
 
 * **Jak obliczyć dostępną energię jako prosument?**
 
