@@ -41,29 +41,25 @@ class TauronAmiplusRawData:
         self.payments: Optional[list[MojTauronPaymentData]] = None
         self.hourly_series = {}
         self.hourly_diagnostics = {}
+        self.balanced = None
 
     def data_unavailable(self):
         return self.consumption is None or self.generation is None
 
+    def _balanced(self, period):
+        return self.balanced.get(period) if self.balanced else None
+
     @property
     def balance_daily(self):
-        if self.data_unavailable() or self.consumption.json_daily is None or self.generation.json_daily is None:
-            return None
-        return self.consumption.json_daily, self.generation.json_daily
+        return self._balanced("daily")
 
     @property
     def balance_monthly(self):
-        if (self.data_unavailable() or self.consumption.json_month_hourly is None or
-                self.generation.json_month_hourly is None):
-            return None
-        return self.consumption.json_month_hourly, self.generation.json_month_hourly
+        return self._balanced("monthly")
 
     @property
     def balance_yearly(self):
-        if (self.data_unavailable() or self.consumption.json_year_hourly is None or
-                self.generation.json_year_hourly is None):
-            return None
-        return self.consumption.json_year_hourly, self.generation.json_year_hourly
+        return self._balanced("yearly")
 
     @property
     def balance_last_12_months_hourly(self):

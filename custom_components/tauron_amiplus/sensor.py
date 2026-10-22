@@ -510,6 +510,16 @@ class TauronAmiplusSensor(SensorEntity, CoordinatorEntity):
         self._params = {k: v for k, v in self._params.items() if v is not None}
 
     def update_balanced_data(self, balanced_data):
+        if len(balanced_data) == 5:
+            # Already netted hour by hour from Recorder statistics
+            balance, sum_consumption, sum_generation, zones, data_range = balanced_data
+            self._state = round(balance, 3)
+            self._params = {
+                "sum_consumption": round(sum_consumption, 3),
+                "sum_generation": round(sum_generation, 3),
+                "data_range": data_range,
+            }
+            return
         con = balanced_data[0]
         gen = balanced_data[1]
         balance, sum_consumption, sum_generation, zones, data_range = TauronAmiplusSensor.get_balanced_data(con, gen)

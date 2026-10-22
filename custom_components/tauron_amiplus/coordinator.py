@@ -125,6 +125,11 @@ class TauronAmiplusUpdateCoordinator(DataUpdateCoordinator[TauronAmiplusRawData]
                 continue
             if values is not None:
                 dataset.json_daily, dataset.daily_date, dataset.json_monthly, dataset.json_yearly = values
+        if self.show_balanced:
+            try:
+                data.balanced = await self._statistics.read_balanced_values()
+            except Exception:
+                _LOGGER.exception("[%s]: Failed to calculate the balance from the Recorder", self.meter_id)
 
     def log(self, msg):
         _LOGGER.debug(f"[{self.meter_id}]: {msg}")

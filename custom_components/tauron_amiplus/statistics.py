@@ -325,6 +325,55 @@ class TauronAmiplusStatisticsUpdater:
             period(today.replace(month=1, day=1), today),
         )
 
+    async def read_balanced_values(self):
+        """Hourly netting of consumption and generation from the Recorder.
+
+        Returns {"daily"|"monthly"|"yearly": (balance, sum_consumption, sum_generation, zones, data_range)}
+        (generation is negative in the balance, as in the former API based calculation) or None without data.
+        """
+        tz = get_time_zone("Europe/Warsaw")
+        today = datetime.datetime.now(tz).date()
+        ids = {"c": self.get_stats_id(CONST_CONSUMPTION), "g": self.get_stats_id(CONST_GENERATION)}
+        result = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass, datetime.datetime(today.year, 1, 1, tzinfo=tz), None, set(ids.values()), "hour", None,
+            {"state"})
+        hours = {}
+        for key, stat_id in ids.items():
+            for row in result.get(stat_id, []):
+                start, state = row.get("start"), row.get("state")
+                if start is None or state is None:
+                    continue
+                if isinstance(start, (int, float)):
+                    start = utc_from_timestamp(start)
+                hours.setdefault(start, {"c": 0.0, "g": 0.0})[key] += float(state)
+        if not hours:
+            return None
+        last_day = max(h.astimezone(tz).date() for h in hours)
+
+        def period(first, last):
+            cons = gen = 0.0
+            days = set()
+            for start, v in hours.items():
+                day = start.astimezone(tz).date()
+                if not first <= day <= last:
+                    continue
+                days.add(day)
+                balance = v["c"] - v["g"]
+                if balance > 0:
+                    cons += balance
+                else:
+                    gen += balance
+            if not days:
+                return None
+            return cons + gen, cons, gen, {}, f"{min(days)} - {max(days)}"
+
+        return {
+            "daily": period(last_day, last_day),
+            "monthly": period(today.replace(day=1), today),
+            "yearly": period(today.replace(month=1, day=1), today),
+        }
+
     async def update_stats(self, statistic_id, statistic_name, initial_sum, last_stats_time, zone_id, raw_data):
         current_sum = initial_sum
         metadata: StatisticMetaData = {
