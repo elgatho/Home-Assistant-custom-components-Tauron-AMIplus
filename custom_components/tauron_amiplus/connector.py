@@ -322,6 +322,38 @@ class TauronAmiplusConnector:
             meters.append({"meter_id": meter_id, "meter_name": display_name, "meter_type": meter_type})
         return meters
 
+    @staticmethod
+    def normalize_period_zones(values):
+        """Rebuild zone totals of monthly/yearly data so that periods with a tariff change stay separated.
+
+        The API reports zones by number only, so a month containing both G11 (zone 1 = whole day) and
+        G12W (zone 1 = peak) would otherwise be summed into a single, misleading zone 1.
+        """
+        if not values or not isinstance(values.get("data"), dict):
+            return values
+        data = values["data"]
+        rows = data.get("allData")
+        current = data.get("tariff")
+        if not rows or not current or not all("Tariff" in r and "Zone" in r and "Sum" in r for r in rows):
+            return values
+        zones, zones_name = {}, {}
+        for row in rows:
+            zone, tariff = str(row["Zone"]), row["Tariff"]
+            try:
+                value = float(row["Sum"])
+            except (TypeError, ValueError):
+                continue
+            label = f'{row.get("ZoneName", zone)} ({row.get("WorkName", "T" + zone)})'
+            if tariff == current:
+                key, name = zone, label
+            else:
+                key, name = f"{tariff}_{zone}", f"{label} [{tariff}]"
+            zones[key] = zones.get(key, 0) + value
+            zones_name.setdefault(key, name)
+        data["zones"] = zones
+        data["zonesName"] = zones_name
+        return values
+
     async def get_values_yearly(self, generation):
         now = datetime.datetime.now()
         first_day_of_year = now.replace(day=1, month=1)
@@ -336,6 +368,7 @@ class TauronAmiplusConnector:
         self.log(f"Downloading yearly data for year: {now.year}, generation: {generation}")
         values = await self.get_chart_values(payload)
         if values is not None:
+            values = TauronAmiplusConnector.normalize_period_zones(values)
             self.log(f"Downloaded yearly data for year: {now.year}, generation: {generation}")
         else:
             self.log(f"Failed to download yearly data for year: {now.year}, generation: {generation}")
@@ -356,6 +389,7 @@ class TauronAmiplusConnector:
         }
         values = await self.get_chart_values(payload)
         if values is not None:
+            values = TauronAmiplusConnector.normalize_period_zones(values)
             self.log(f"Downloaded monthly data for month: {now.year}.{now.month}, generation: {generation}")
         else:
             self.log(f"Failed to download monthly data for month: {now.year}.{now.month}, generation: {generation}")

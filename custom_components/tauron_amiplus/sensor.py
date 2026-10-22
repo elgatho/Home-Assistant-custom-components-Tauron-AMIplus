@@ -11,6 +11,7 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import CONF_MONITORED_VARIABLES, CONF_NAME, CONF_PASSWORD, CONF_USERNAME, UnitOfEnergy
+from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -127,6 +128,126 @@ async def async_setup_entry(hass, entry: TauronAmiplusConfigEntry, async_add_ent
         )
 
     async_add_entities(sensors, False)
+
+    added_zone_sensors: set[str] = set()
+
+    @callback
+    def _add_zone_sensors() -> None:
+        """Add per-zone sensors as soon as the detected tariff has more than one zone (e.g. G12, G12W)."""
+        zones = current_tariff_zones(coordinator.data)
+        if len(zones) < 2:
+            return
+        new_sensors = []
+        for zone_id in zones:
+            if zone_id not in added_zone_sensors:
+                added_zone_sensors.add(zone_id)
+                new_sensors.append(TauronAmiplusZoneSensor(coordinator, meter_id, meter_name, zone_id))
+        if OFF_PEAK_SHARE_KEY not in added_zone_sensors:
+            added_zone_sensors.add(OFF_PEAK_SHARE_KEY)
+            new_sensors.append(TauronAmiplusOffPeakShareSensor(coordinator, meter_id, meter_name))
+        if new_sensors:
+            async_add_entities(new_sensors, False)
+
+    _add_zone_sensors()
+    entry.async_on_unload(coordinator.async_add_listener(_add_zone_sensors))
+
+
+OFF_PEAK_SHARE_KEY = "off_peak_share"
+
+
+def current_tariff_zones(data) -> dict[str, tuple[str, float]]:
+    """Return {zone_id: (zone_name, monthly consumption)} for zones of the currently active tariff."""
+    json_monthly = getattr(getattr(data, "consumption", None), "json_monthly", None)
+    if not json_monthly or not isinstance(json_monthly.get("data"), dict):
+        return {}
+    monthly = json_monthly["data"]
+    names = monthly.get("zonesName") or {}
+    values = monthly.get("zones") or {}
+    return {
+        zone_id: (name, float(values.get(zone_id, 0)))
+        for zone_id, name in sorted(names.items())
+        if "_" not in str(zone_id)
+    }
+
+
+class TauronAmiplusZoneSensor(SensorEntity, CoordinatorEntity):
+    """Monthly consumption in a single tariff zone (only created for multi-zone tariffs)."""
+
+    def __init__(self, coordinator: TauronAmiplusUpdateCoordinator, meter_id: str, meter_name: str, zone_id: str):
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._meter_name = meter_name
+        self._zone_id = zone_id
+        self._attr_unique_id = f"tauron-{meter_id}-monthly_zone_{zone_id}_energy_consumption"
+        self._attr_name = f"{DEFAULT_NAME} {meter_name} monthly energy consumption zone {zone_id}"
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_icon = "mdi:counter"
+
+    @property
+    def device_info(self):
+        return {"identifiers": {(DOMAIN, self._meter_id)}}
+
+    @property
+    def available(self):
+        return super().available and self._zone_id in current_tariff_zones(self.coordinator.data)
+
+    @property
+    def native_value(self):
+        zone = current_tariff_zones(self.coordinator.data).get(self._zone_id)
+        return round(zone[1], 3) if zone else None
+
+    @property
+    def extra_state_attributes(self):
+        zone = current_tariff_zones(self.coordinator.data).get(self._zone_id)
+        return {
+            "tariff": getattr(self.coordinator.data, "tariff", None),
+            "zone": zone[0] if zone else None,
+        }
+
+
+class TauronAmiplusOffPeakShareSensor(SensorEntity, CoordinatorEntity):
+    """Share of monthly consumption in the cheaper (last) zone of a multi-zone tariff."""
+
+    def __init__(self, coordinator: TauronAmiplusUpdateCoordinator, meter_id: str, meter_name: str):
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._attr_unique_id = f"tauron-{meter_id}-monthly_off_peak_share"
+        self._attr_name = f"{DEFAULT_NAME} {meter_name} monthly off-peak consumption share"
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_icon = "mdi:percent"
+
+    @property
+    def device_info(self):
+        return {"identifiers": {(DOMAIN, self._meter_id)}}
+
+    def _share(self):
+        zones = current_tariff_zones(self.coordinator.data)
+        if len(zones) < 2:
+            return None, None, 0
+        total = sum(v for _, v in zones.values())
+        cheaper = max(zones, key=int)
+        return (zones[cheaper][1] / total * 100 if total > 0 else None), zones[cheaper][0], total
+
+    @property
+    def available(self):
+        return super().available and self._share()[0] is not None
+
+    @property
+    def native_value(self):
+        share = self._share()[0]
+        return round(share, 1) if share is not None else None
+
+    @property
+    def extra_state_attributes(self):
+        _, name, total = self._share()
+        return {
+            "tariff": getattr(self.coordinator.data, "tariff", None),
+            "cheaper_zone": name,
+            "total_in_tariff": round(total, 3),
+        }
 
 
 class TauronAmiplusEnergyStorageSensor(SensorEntity, CoordinatorEntity):
