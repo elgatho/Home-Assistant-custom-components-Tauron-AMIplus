@@ -9,6 +9,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.util.dt import as_utc, get_time_zone, utc_from_timestamp
 
+from .hourly_data import hour_start
 from .history_import import build_metadata, statistic_id
 from .connector import TauronAmiplusConnector, TauronAmiplusRawData
 from .const import (CONF_METER_ID, CONF_METER_NAME, CONF_SHOW_BALANCED, CONF_SHOW_GENERATION, CONST_BALANCED,
@@ -433,19 +434,4 @@ class TauronAmiplusStatisticsUpdater:
 
     @staticmethod
     def get_time(raw_hour):
-        zone = get_time_zone("Europe/Warsaw")
-        value = raw_hour.get("Date")
-        if not isinstance(value, str):
-            return None
-        try:
-            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            try:
-                day = datetime.date.fromisoformat(value[:10])
-                hour = int(raw_hour.get("Hour", "")) - 1
-                if not 0 <= hour <= 23:
-                    return None
-                return datetime.datetime.combine(day, datetime.time(hour), tzinfo=zone)
-            except (TypeError, ValueError):
-                return None
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=zone)
+        return hour_start(raw_hour)

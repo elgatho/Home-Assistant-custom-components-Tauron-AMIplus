@@ -86,3 +86,20 @@ def test_raw_payload_parses_four_series():
     result = hourly_data.parse_raw_payload(load_fixture())
     assert set(result) == set(hourly_data.MEASUREMENT_TYPES)
     assert all(result[key] for key in hourly_data.MEASUREMENT_TYPES)
+
+
+def test_hour_start_ignores_time_part_of_date():
+    from datetime import timedelta
+    rows = [{"Date": "2026-10-21T02:00:00.000+02:00", "Hour": str(h)} for h in range(1, 25)]
+    starts = [hourly_data.hour_start(r) for r in rows]
+    assert len(set(starts)) == 24
+    assert all(b - a == timedelta(hours=1) for a, b in zip(starts, starts[1:]))
+    assert starts[0].astimezone(hourly_data.WARSAW).isoformat() == "2026-10-21T00:00:00+02:00"
+    assert starts[-1].astimezone(hourly_data.WARSAW).isoformat() == "2026-10-21T23:00:00+02:00"
+
+
+def test_hour_start_dst_day_has_25_distinct_hours():
+    starts = {hourly_data.hour_start({"Date": "2026-10-25", "Hour": h}) for h in range(1, 26)}
+    assert len(starts) == 25
+    assert hourly_data.hour_start({"Date": None, "Hour": 1}) is None
+    assert hourly_data.hour_start({"Date": "2026-10-25", "Hour": 99}) is None

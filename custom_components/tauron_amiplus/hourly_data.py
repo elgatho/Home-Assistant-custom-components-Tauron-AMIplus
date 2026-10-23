@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import json
 import logging
@@ -89,6 +89,26 @@ def _local_timestamp(day: date, hour: int, occurrence: int) -> datetime:
     naive = datetime.combine(day, time()) + timedelta(hours=hour - 1)
     fold = 1 if hour == 3 and occurrence else 0
     return naive.replace(tzinfo=WARSAW, fold=fold)
+
+
+def hour_start(raw_hour: dict[str, Any]) -> datetime | None:
+    """UTC start of the hour of a raw reading: day from "Date", offset from "Hour" (1-24) in real hours.
+
+    The API repeats the day's timestamp (e.g. 2026-10-21T02:00:00.000+02:00) in every hour of the day, so the time
+    part of "Date" must be ignored. Counting real hours keeps DST days (23/25 hours) correct.
+    """
+    value = raw_hour.get("Date")
+    if not isinstance(value, str):
+        return None
+    try:
+        day = date.fromisoformat(value[:10])
+        hour = int(raw_hour.get("Hour", "")) - 1
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= hour <= 24:
+        return None
+    midnight = datetime.combine(day, time(), tzinfo=WARSAW).astimezone(timezone.utc)
+    return midnight + timedelta(hours=hour)
 
 
 def _response_data(endpoint: dict[str, Any]) -> dict[str, Any] | None:
